@@ -5,20 +5,18 @@ from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
 from torchvision.models import resnet50, ResNet50_Weights
-
-from plot_utils import plot_histogram_balance_of_dataset, plot_loss
 import torch.nn.functional as F  # For softmax function
 import numpy as np
 
 
 class Model:
     def __init__(self, learning_rate, batch_size, patience_early_stopping, patience_reduce_learning_rate, train_dir,
-                 val_dir, test_dir, class_names, train_val_split_ratio):
+                 test_dir, class_names, train_val_split_ratio):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.test_loader = None
         self.val_loader = None
         self.train_loader = None
-        self.create_data_loaders(batch_size, test_dir, train_dir, val_dir, train_val_split_ratio)
+        self.create_data_loaders(batch_size, test_dir, train_dir, train_val_split_ratio)
         # Load a pretrained resnet
         self.model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
 
@@ -85,8 +83,9 @@ class Model:
 
         if best_model_state is not None:
             self.model.load_state_dict(best_model_state)
+        return train_losses, val_losses
 
-    def evaluate_model(self):
+    def evaluate(self):
         self.model.eval()  # Set model to evaluation mode
         true_labels = []
         predicted_labels = []
@@ -122,7 +121,7 @@ class Model:
         print(f"Test Accuracy: {test_acc:.4f}")
         return true_labels, predicted_labels, confidence_values
 
-    def create_data_loaders(self, batch_size, test_dir, train_dir, val_dir, train_val_split_ratio):
+    def create_data_loaders(self, batch_size, test_dir, train_dir, train_val_split_ratio):
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -131,7 +130,6 @@ class Model:
 
         # Create custom ImageNet dataset loaders
         train_dataset = ImageFolder(train_dir, transform=transform)
-        val_dataset = ImageFolder(val_dir, transform=transform)
         test_dataset = ImageFolder(test_dir, transform=transform)
 
         # Split train set in train_set and val_set
