@@ -1,11 +1,26 @@
+import os
+
 from matplotlib import pyplot as plt
 
-def plot_histogram_balance_of_dataset(categories, counts, title):
-    plt.figure(figsize=(10, 6))
-    plt.bar(categories, counts, color='skyblue')
-    plt.xlabel('Dataset Categories')
-    plt.ylabel('Number of Samples')
+from data_utils import get_class_names
+
+
+def plot_histogram_balance_of_dataset(data_dir, title):
+    classes = get_class_names(data_dir)
+
+    # Count the number of files in each class directory
+    class_counts = {cls: len(os.listdir(os.path.join(data_dir, cls))) for cls in classes}
+
+    # Sort classes alphabetically or by frequency for consistency
+    classes_sorted = sorted(class_counts.keys())
+    counts_sorted = [class_counts[cls] for cls in classes_sorted]
+
+    # Plot the histogram
+    plt.bar(classes_sorted, counts_sorted, tick_label=[f"Class {cls}" for cls in classes_sorted])
+    plt.xlabel("Class")
+    plt.ylabel("Number of Samples")
     plt.title(title)
+    plt.xticks(rotation=45, ha='right')  # Rotate class names for better visibility if many
     plt.show()
 
 

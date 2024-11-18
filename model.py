@@ -5,13 +5,14 @@ from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
 from torchvision.models import resnet18, ResNet18_Weights
-import torch.nn.functional as F  # For softmax function
 import numpy as np
+
+from data_utils import get_class_names
 
 
 class Model:
     def __init__(self, learning_rate, batch_size, patience_early_stopping, patience_reduce_learning_rate, train_dir,
-                 test_dir, class_names, train_val_split_ratio):
+                 test_dir, train_val_split_ratio):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.test_loader = None
         self.val_loader = None
@@ -21,6 +22,8 @@ class Model:
         self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
 
         num_features = self.model.fc.in_features
+
+        class_names = get_class_names(train_dir)
         self.model.fc = nn.Linear(num_features, len(class_names))
 
         self.criterion = nn.CrossEntropyLoss()
@@ -48,8 +51,10 @@ class Model:
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item()
+
             train_loss /= len(self.train_loader)
             train_losses.append(train_loss)
+
             # Validation
             self.model.eval()
             val_loss = 0.0
@@ -86,39 +91,27 @@ class Model:
         return train_losses, val_losses
 
     def evaluate(self):
-        self.model.eval()  # Set model to evaluation mode
+        self.model.eval()
         true_labels = []
         predicted_labels = []
         confidence_values = []
-        test_correct_preds = 0
-        test_total_preds = 0
 
-        # Assuming you have a test_loader for the test set
-        with torch.no_grad():  # No need to compute gradients during evaluation
+        with torch.no_grad():
             for input_tensor, label_tensor in self.test_loader:
                 input_tensor, label_tensor = input_tensor.to(self.device), label_tensor.to(self.device)
 
-                # Forward pass: get model outputs (logits)
                 output_tensor = self.model(input_tensor)
 
-                # Apply softmax to get probabilities (confidence scores)
-                probabilities = F.softmax(output_tensor, dim=1)
+                probabilities = torch.softmax(output_tensor, dim=1)
 
                 # Get the predicted class (class with the highest probability)
-                value_tensor, predicted_tensor = torch.max(probabilities, 1)
+                confidence_tensor, predicted_tensor = torch.max(probabilities, dim=1)
 
-                is_sample_correct_predicted = (predicted_tensor == label_tensor)
-                for label, predicted_label, value in zip(label_tensor, predicted_tensor, value_tensor):
-                    true_labels.append(label.item())
-                    predicted_labels.append(predicted_label.item())
-                    confidence_values.append(value.item())
-                    if predicted_label == label:
-                        test_correct_preds += 1
+                # Track true labels, predictions, and confidence scores
+                true_labels.extend(label_tensor.cpu().tolist())
+                predicted_labels.extend(predicted_tensor.cpu().tolist())
+                confidence_values.extend(confidence_tensor.cpu().tolist())
 
-                    test_total_preds += 1
-
-        test_acc = test_correct_preds / test_total_preds
-        print(f"Test Accuracy: {test_acc:.4f}")
         return true_labels, predicted_labels, confidence_values
 
     def create_data_loaders(self, batch_size, test_dir, train_dir, train_val_split_ratio):
