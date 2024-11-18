@@ -4,7 +4,7 @@ from torch import optim, nn
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
-from torchvision.models import resnet50, ResNet50_Weights
+from torchvision.models import resnet18, ResNet18_Weights
 import torch.nn.functional as F  # For softmax function
 import numpy as np
 
@@ -18,7 +18,7 @@ class Model:
         self.train_loader = None
         self.create_data_loaders(batch_size, test_dir, train_dir, train_val_split_ratio)
         # Load a pretrained resnet
-        self.model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+        self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
 
         num_features = self.model.fc.in_features
         self.model.fc = nn.Linear(num_features, len(class_names))
@@ -52,7 +52,7 @@ class Model:
             train_losses.append(train_loss)
             # Validation
             self.model.eval()
-            val_loss = 0
+            val_loss = 0.0
             with torch.no_grad():
                 for input_tensor, label_tensor in self.val_loader:
                     input_tensor, label_tensor = input_tensor.to(self.device), label_tensor.to(self.device)
