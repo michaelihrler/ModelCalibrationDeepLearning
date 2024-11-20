@@ -9,6 +9,7 @@ import numpy as np
 
 from data_utils import get_class_names
 from platt_scaling import PlattScaling
+from plot_utils import plot_multiclass_calibration_curve
 from temperature_scaling import TemperatureScaling
 
 
@@ -60,15 +61,8 @@ class Model:
             train_losses.append(train_loss)
 
             # Validation
-            self.model.eval()
-            val_loss = 0.0
-            with torch.no_grad():
-                for input_tensor, label_tensor in self.val_loader:
-                    input_tensor, label_tensor = input_tensor.to(self.device), label_tensor.to(self.device)
-                    output_tensor = self.model(input_tensor)
-                    loss = self.criterion(output_tensor, label_tensor)
-                    val_loss += loss.item()
-            val_loss /= len(self.val_loader)
+            true_labels, predicted_labels, confidence_values, confidence_all_classes, val_loss = self.evaluate()
+            plot_multiclass_calibration_curve(y_true=true_labels, y_pred_proba=np.array(confidence_all_classes))
             val_losses.append(val_loss)
 
             print(
@@ -100,6 +94,7 @@ class Model:
         predicted_labels = []
         confidence_predictions = []
         confidence_all_classes_tensor = []
+        val_loss = 0.0
 
         with torch.no_grad():
             for input_tensor, label_tensor in self.test_loader:
@@ -117,8 +112,11 @@ class Model:
                 true_labels.extend(label_tensor.cpu().tolist())
                 predicted_labels.extend(predicted_tensor.cpu().tolist())
                 confidence_predictions.extend(confidence_tensor.cpu().tolist())
+                loss = self.criterion(output_tensor, label_tensor)
+                val_loss += loss.item()
 
-        return true_labels, predicted_labels, confidence_predictions, np.array(confidence_all_classes_tensor)
+        val_loss /= len(self.val_loader)
+        return true_labels, predicted_labels, confidence_predictions, np.array(confidence_all_classes_tensor), loss
 
     def create_data_loaders(self, batch_size, test_dir, train_dir, train_val_split_ratio):
         transform = transforms.Compose([
