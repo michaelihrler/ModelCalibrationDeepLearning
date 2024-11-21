@@ -20,7 +20,7 @@ def plot_histogram_balance_of_dataset(data_dir, title):
     counts_sorted = [class_counts[cls] for cls in classes_sorted]
 
     # Plot the histogram
-    plt.bar(classes_sorted, counts_sorted, tick_label=[f"Class {cls}" for cls in classes_sorted])
+    plt.bar(classes_sorted, counts_sorted, tick_label=[f"{cls}" for cls in classes_sorted])
     plt.xlabel("Class")
     plt.ylabel("Number of Samples")
     plt.title(title)

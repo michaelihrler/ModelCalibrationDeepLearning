@@ -41,91 +41,110 @@ class Model:
                                                               patience=patience_reduce_learning_rate)
 
     def train_model(self, num_epochs):
-        best_val_loss = np.inf
+        best_val_loss = float("inf")
         counter = 0
         best_model_state = None
         train_losses = []
         val_losses = []
+
         for epoch in range(num_epochs):
             self.model.train()
             train_loss = 0.0
+
             for input_tensor, label_tensor in self.train_loader:
                 input_tensor, label_tensor = input_tensor.to(self.device), label_tensor.to(self.device)
 
+                self.optimizer.zero_grad()  # Reset gradients
                 output_tensor = self.model(input_tensor)
                 loss = self.criterion(output_tensor, label_tensor)
                 loss.backward()
                 self.optimizer.step()
-                train_loss += loss.item()
 
-            train_loss /= len(self.train_loader)
-            train_losses.append(train_loss)
+                train_loss += loss.item()  # Accumulate batch loss
+
+            # Calculate average train loss
+            avg_train_loss = train_loss / len(self.train_loader)
+            train_losses.append(avg_train_loss)
 
             # Validation
-            true_labels, predicted_labels, confidence_all_classes, val_loss = self.evaluate()
-            plot_multiclass_calibration_curve(y_true=true_labels, y_pred_proba=np.array(confidence_all_classes), title = "Baseline Training")
-            val_losses.append(val_loss)
+            true_labels, predicted_labels, confidence_all_classes, val_loss = self.evaluate(dataloader=self.val_loader)
 
             print(
-                f"Epoch {epoch + 1}/{num_epochs}, Train Loss: {train_loss}, Validation Loss: {val_loss}, Learning Rate: {self.optimizer.param_groups[0]['lr']}")
+                f"Epoch {epoch + 1}/{num_epochs}, "
+                f"Train Loss: {avg_train_loss:.4f}, "
+                f"Validation Loss: {val_loss:.4f}, "
+                f"Learning Rate: {self.optimizer.param_groups[0]['lr']}"
+            )
+
+            plot_multiclass_calibration_curve(
+                y_true=true_labels,
+                y_pred_proba=np.array(confidence_all_classes),
+                title="Baseline Training"
+            )
+            
+            val_losses.append(val_loss)
 
             # Reduce Learning Rate on Plateau
             self.scheduler.step(val_loss)
 
-            # Check for Early Stopping und store best model
-            # Improved mode
+            # Early stopping logic
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 counter = 0
                 best_model_state = self.model.state_dict()
-            # No improvement
             else:
                 counter += 1
                 if counter >= self.patience_early_stopping:
-                    print(f'Early stopping after {epoch + 1} Epochs')
+                    print(f"Early stopping triggered after {epoch + 1} epochs.")
                     break
 
+        # Load best model
         if best_model_state is not None:
             self.model.load_state_dict(best_model_state)
+
         return train_losses, val_losses
 
-    # Evaluation mit Temperature Scaling
-    def evaluate(self, calibration_model=None):
+    def evaluate(self, calibration_model=None, dataloader=None):
+        """
+        Evaluate the model on the given dataloader.
+
+        :param calibration_model: Optional calibration model to apply to logits.
+        :param dataloader: DataLoader to evaluate on. Defaults to test_loader if None.
+        :return: Tuple (true_labels, predicted_labels, confidence_all_classes, average_loss)
+        """
         self.model.eval()
         true_labels = []
         predicted_labels = []
-        confidence_all_classes_tensor = []
-        val_loss = 0.0
+        confidence_all_classes = []
+        total_loss = 0.0  # Use a separate variable for accumulating loss
+
+        if dataloader is None:
+            dataloader = self.test_loader
 
         with torch.no_grad():
-            for input_tensor, label_tensor in self.test_loader:
+            for input_tensor, label_tensor in dataloader:
                 input_tensor, label_tensor = input_tensor.to(self.device), label_tensor.to(self.device)
 
-                # Logits vom Modell erhalten
                 output_tensor = self.model(input_tensor)
 
-                # Temperature Scaling anwenden (falls vorhanden)
                 if calibration_model is not None:
                     output_tensor = calibration_model(output_tensor)
 
-                # Softmax für Wahrscheinlichkeiten anwenden
                 probabilities = torch.softmax(output_tensor, dim=1)
-
-                # Wahrscheinlichkeiten und Vorhersagen sammeln
-                confidence_all_classes_tensor.append(probabilities.cpu())
+                confidence_all_classes.append(probabilities.cpu())
                 _, predicted_tensor = torch.max(probabilities, dim=1)
 
                 true_labels.extend(label_tensor.cpu().tolist())
                 predicted_labels.extend(predicted_tensor.cpu().tolist())
 
-                # Loss berechnen
-                loss = self.criterion(output_tensor, label_tensor)
-                val_loss += loss.item()
+                batch_loss = self.criterion(output_tensor, label_tensor)
+                total_loss += batch_loss.item()  # Accumulate batch loss
 
-        val_loss /= len(self.val_loader)
-        confidence_all_classes_tensor = torch.cat(confidence_all_classes_tensor).numpy()
+        # Calculate average loss over all batches
+        avg_loss = total_loss / len(dataloader)
+        confidence_all_classes = torch.cat(confidence_all_classes).numpy()
 
-        return true_labels, predicted_labels, confidence_all_classes_tensor, val_loss
+        return true_labels, predicted_labels, confidence_all_classes, avg_loss
 
     def create_data_loaders(self, batch_size, test_dir, train_dir, train_val_split_ratio):
         transform = transforms.Compose([
