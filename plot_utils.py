@@ -1,5 +1,5 @@
 import os
-
+import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.calibration import calibration_curve
@@ -43,15 +43,16 @@ def plot_loss(train_loss, val_loss):
     plt.show()
 
 
-def plot_confusion_matrix(true_labels, predicted_labels):
+def plot_confusion_matrix(true_labels, predicted_labels, title):
     unique_classes = np.unique(true_labels + predicted_labels)
     cm = confusion_matrix(true_labels, predicted_labels, labels=unique_classes)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=unique_classes)
     disp.plot(cmap=plt.cm.Blues)
+    plt.title(title)
     plt.show()
 
 
-def plot_multiclass_calibration_curve(y_true, y_pred_proba, class_labels=None, n_bins=20, strategy='uniform'):
+def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, n_bins=20, strategy='uniform'):
     """
     Plots calibration curves for a multiclass classifier.
 
@@ -110,13 +111,13 @@ def plot_multiclass_calibration_curve(y_true, y_pred_proba, class_labels=None, n
 
     plt.xlabel('Predicted Probability')
     plt.ylabel('True Probability')
-    plt.title('Calibration Curve for Classifier')
+    plt.title(title)
     plt.legend(loc='best')
     plt.grid()
     plt.show()
 
 
-def plot_multiclass_roc_auc(y_true, y_pred_proba, class_labels=None):
+def plot_multiclass_roc_auc(y_true, y_pred_proba, title, class_labels=None):
     """
     Plots the ROC AUC curve for a multiclass or binary classifier.
 
@@ -163,7 +164,42 @@ def plot_multiclass_roc_auc(y_true, y_pred_proba, class_labels=None):
 
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.title('ROC AUC Curve for Classifier')
+    plt.title(title)
     plt.legend(loc='best')
     plt.grid()
+    plt.show()
+
+
+def plot_metrics_table(results):
+    df = pd.DataFrame(results)
+
+    # Create a Matplotlib figure
+    fig, ax = plt.subplots(figsize=(10, 4))  # Adjust the size as needed
+
+    # Hide axes
+    ax.axis("tight")
+    ax.axis("off")
+
+    # Add a table at the center
+    table = ax.table(
+        cellText=df.values,
+        colLabels=df.columns,
+        cellLoc="center",
+        loc="center",
+    )
+
+    # Customize table style
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.auto_set_column_width(col=list(range(len(df.columns))))  # Auto-adjust column widths
+
+    # Set header cell colors
+    for (row, col), cell in table.get_celld().items():
+        if row == 0:  # Header row
+            cell.set_fontsize(12)
+            cell.set_facecolor("lightgrey")
+            cell.set_text_props(weight="bold")
+        else:
+            cell.set_facecolor("white")
+
     plt.show()

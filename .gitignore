@@ -1,4 +1,6 @@
 /test_data_chest_xray_3_3_split/
 /train_data_chest_xray_3_3_split/
 /chest_xray/
-/chest_xray/
+/model.pth
+/Skin cancer ISIC The International Skin Imaging Collaboration/
+/.idea

@@ -1,4 +1,5 @@
 import os
+
 import torch
 from torch import optim, nn
 from torchvision.datasets import ImageFolder
@@ -61,8 +62,8 @@ class Model:
             train_losses.append(train_loss)
 
             # Validation
-            true_labels, predicted_labels, confidence_values, confidence_all_classes, val_loss = self.evaluate()
-            plot_multiclass_calibration_curve(y_true=true_labels, y_pred_proba=np.array(confidence_all_classes))
+            true_labels, predicted_labels, confidence_all_classes, val_loss = self.evaluate()
+            plot_multiclass_calibration_curve(y_true=true_labels, y_pred_proba=np.array(confidence_all_classes), title = "Baseline Training")
             val_losses.append(val_loss)
 
             print(
@@ -88,11 +89,11 @@ class Model:
             self.model.load_state_dict(best_model_state)
         return train_losses, val_losses
 
-    def evaluate(self):
+    # Evaluation mit Temperature Scaling
+    def evaluate(self, calibration_model=None):
         self.model.eval()
         true_labels = []
         predicted_labels = []
-        confidence_predictions = []
         confidence_all_classes_tensor = []
         val_loss = 0.0
 
@@ -100,23 +101,31 @@ class Model:
             for input_tensor, label_tensor in self.test_loader:
                 input_tensor, label_tensor = input_tensor.to(self.device), label_tensor.to(self.device)
 
+                # Logits vom Modell erhalten
                 output_tensor = self.model(input_tensor)
 
+                # Temperature Scaling anwenden (falls vorhanden)
+                if calibration_model is not None:
+                    output_tensor = calibration_model(output_tensor)
+
+                # Softmax für Wahrscheinlichkeiten anwenden
                 probabilities = torch.softmax(output_tensor, dim=1)
 
-                for prob in probabilities: confidence_all_classes_tensor.append(prob)
-                # Get the predicted class (class with the highest probability)
-                confidence_tensor, predicted_tensor = torch.max(probabilities, dim=1)
+                # Wahrscheinlichkeiten und Vorhersagen sammeln
+                confidence_all_classes_tensor.append(probabilities.cpu())
+                _, predicted_tensor = torch.max(probabilities, dim=1)
 
-                # Track true labels, predictions, and confidence scores
                 true_labels.extend(label_tensor.cpu().tolist())
                 predicted_labels.extend(predicted_tensor.cpu().tolist())
-                confidence_predictions.extend(confidence_tensor.cpu().tolist())
+
+                # Loss berechnen
                 loss = self.criterion(output_tensor, label_tensor)
                 val_loss += loss.item()
 
         val_loss /= len(self.val_loader)
-        return true_labels, predicted_labels, confidence_predictions, np.array(confidence_all_classes_tensor), loss
+        confidence_all_classes_tensor = torch.cat(confidence_all_classes_tensor).numpy()
+
+        return true_labels, predicted_labels, confidence_all_classes_tensor, val_loss
 
     def create_data_loaders(self, batch_size, test_dir, train_dir, train_val_split_ratio):
         transform = transforms.Compose([
@@ -140,12 +149,47 @@ class Model:
         self.test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     def optimize_temperature(self):
-        temperature_model = TemperatureScaling().to(device)
+        """
+        Optimizes the temperature scaling model for multi-class logits.
+        :return: The optimized TemperatureScaling model.
+        """
+        temperature_model = TemperatureScaling().to(self.device)
         criterion = nn.CrossEntropyLoss()
 
-        # alternativen (z. B. SGD oder Adam)
-        # TODO
         optimizer = optim.LBFGS([temperature_model.temperature], lr=0.01, max_iter=50)
+
+        logits_list = []
+        labels_list = []
+
+        # Collect logits and labels from the validation set
+        with torch.no_grad():
+            for inputs, labels in self.val_loader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                logits = self.model(inputs)
+                logits_list.append(logits)
+                labels_list.append(labels)
+
+        logits = torch.cat(logits_list)  # Shape: [num_samples, num_classes]
+        labels = torch.cat(labels_list)  # Shape: [num_samples]
+
+        # Optimization closure for LBFGS
+        def closure():
+            optimizer.zero_grad()
+            scaled_logits = temperature_model(logits)
+            loss = criterion(scaled_logits, labels)
+            loss.backward()
+            return loss
+
+        # Perform optimization
+        optimizer.step(closure)
+        return temperature_model
+
+    def optimize_platt_scaling(self):
+        num_classes = len(self.model.fc.weight)  # Number of output classes
+        platt_scaling = PlattScaling(num_classes).to(self.device)
+        criterion = nn.CrossEntropyLoss()  # Multi-class Cross-Entropy Loss
+
+        optimizer = optim.LBFGS([platt_scaling.w, platt_scaling.b], lr=0.01, max_iter=50)
 
         logits_list = []
         labels_list = []
@@ -157,49 +201,28 @@ class Model:
                 logits_list.append(logits)
                 labels_list.append(labels)
 
-        logits = torch.cat(logits_list)
-        labels = torch.cat(labels_list)
+        logits = torch.cat(logits_list)  # Shape: [num_samples, num_classes]
+        labels = torch.cat(labels_list)  # Shape: [num_samples]
 
-        # Optimierungsfunktion (Closure für LBFGS)
         def closure():
             optimizer.zero_grad()
-            scaled_logits = temperature_model(logits)
+            scaled_logits = platt_scaling(logits)  # Calibrated probabilities
             loss = criterion(scaled_logits, labels)
             loss.backward()
             return loss
 
         optimizer.step(closure)
-        print(f"Optimized Temperature: {temperature_model.temperature.item()}")
-        return temperature_model.temperature.item()
-
-    def optimize_platt_scaling(self):
-        platt_scaling = PlattScaling().to(self.device)
-        criterion = nn.BCELoss()  # Binary Cross-Entropy Loss
-
-        # Optimizer (z. B. SGD oder Adam)
-        optimizer = optim.LBFGS([platt_scaling.w, platt_scaling.b], lr=0.01, max_iter=50)
-
-        logits_list = []
-        labels_list = []
-
-        with torch.no_grad():
-            for inputs, labels in self.val_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                logits = self.model(inputs)
-                logits_list.append(logits)
-                labels_list.append(labels.float())
-
-        logits = torch.cat(logits_list)
-        labels = torch.cat(labels_list)
-
-        # Optimierungsfunktion (Closure für LBFGS)
-        def closure():
-            optimizer.zero_grad()
-            scaled_logits = platt_scaling(logits)  # Calibrated probs
-            loss = criterion(scaled_logits, labels)
-            loss.backward()
-            return loss
-        optimizer.step(closure)
-
-        print(f"Optimized Parameters: w={platt_scaling.w.item()}, b={platt_scaling.b.item()}")
         return platt_scaling
+
+    def load_existing_model(self, model_path):
+        """
+        Load an existing model's state from a file.
+
+        :param model_path: Path to the saved model's state dictionary.
+        """
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.to(self.device)
+        print(f"Model loaded from {model_path}")
