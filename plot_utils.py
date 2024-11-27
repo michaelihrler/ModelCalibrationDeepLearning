@@ -52,18 +52,20 @@ def plot_confusion_matrix(true_labels, predicted_labels, title):
     plt.show()
 
 
-def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, n_bins=20, strategy='uniform'):
+def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, class_names=None, n_bins=20, strategy='uniform'):
     """
-    Plots calibration curves for a multiclass classifier.
+    Plots calibration curves for a multiclass or binary classifier with actual class names.
 
     Parameters:
     - y_true: array-like of shape (n_samples,)
         True labels for the samples.
     - y_pred_proba: array-like of shape (n_samples, n_classes)
-        Predicted probabilities for each class.
-    - class_labels: list or array-like, default=None
-        Class labels to display in the legend. If None, use integers [0, ..., n_classes-1].
-    - n_bins: int, default=10
+        Predicted probabilities for each class (after softmax).
+    - title: str
+        Title of the plot.
+    - class_names: list or array-like, default=None
+        Names of the classes to use in the legend. If None, uses "Class 0", "Class 1", etc.
+    - n_bins: int, default=20
         Number of bins to discretize the probability space.
     - strategy: {'uniform', 'quantile'}, default='uniform'
         Strategy to define the width of the bins.
@@ -71,32 +73,42 @@ def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, n_bins=20, st
     Returns:
     - None (plots the calibration curve)
     """
-    # Ensure y_true is a numpy array
+    # Ensure y_true and y_pred_proba are numpy arrays
     y_true = np.array(y_true)
+    y_pred_proba = np.array(y_pred_proba)
+
+    # Check if y_pred_proba sums to 1 (softmax probabilities)
+    if not np.allclose(y_pred_proba.sum(axis=1), 1, atol=1e-2):
+        raise ValueError("y_pred_proba should be softmax probabilities that sum to 1 across classes.")
 
     # Determine number of classes
-    n_classes = len(np.unique(y_true))
+    n_classes = y_pred_proba.shape[1]
 
     # One-hot encode y_true for multi-class or handle binary case
     if n_classes == 2:
         y_true_binarized = y_true  # Binary classification, no binarization needed
     else:
+        from sklearn.preprocessing import label_binarize
         y_true_binarized = label_binarize(y_true, classes=np.arange(n_classes))
 
-    class_labels = [f'Class {i}' for i in range(n_classes)]
+    # Set class names if not provided
+    if class_names is None:
+        class_names = [f"Class {i}" for i in range(n_classes)]
 
     # Plot calibration curve
     plt.figure(figsize=(10, 7))
 
     if n_classes == 2:
+        # Binary classification
         prob_true, prob_pred = calibration_curve(
             y_true_binarized,
             y_pred_proba[:, 1],  # Use the positive class probabilities
             n_bins=n_bins,
             strategy=strategy
         )
-        plt.plot(prob_pred, prob_true, marker='o', label='Class 1')
+        plt.plot(prob_pred, prob_true, marker='o', label=class_names[1])
     else:
+        # Multi-class classification
         for i in range(n_classes):
             prob_true, prob_pred = calibration_curve(
                 y_true_binarized[:, i],
@@ -104,7 +116,7 @@ def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, n_bins=20, st
                 n_bins=n_bins,
                 strategy=strategy
             )
-            plt.plot(prob_pred, prob_true, marker='o', label=class_labels[i])
+            plt.plot(prob_pred, prob_true, marker='o', label=class_names[i])
 
     # Plot the perfect calibration line
     plt.plot([0, 1], [0, 1], linestyle='--', color='black', label='Perfect calibration')
@@ -113,8 +125,10 @@ def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, n_bins=20, st
     plt.ylabel('True Probability')
     plt.title(title)
     plt.legend(loc='best')
-    plt.grid()
+    plt.grid(alpha=0.6)
+    plt.tight_layout()
     plt.show()
+
 
 
 def plot_multiclass_roc_auc(y_true, y_pred_proba, title, class_labels=None):
