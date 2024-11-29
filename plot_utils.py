@@ -11,20 +11,12 @@ from data_utils import get_class_names
 
 def plot_histogram_balance_of_dataset(data_dir, title):
     classes = get_class_names(data_dir)
-
-    # Count the number of files in each class directory
     class_counts = {cls: len(os.listdir(os.path.join(data_dir, cls))) for cls in classes}
-
-    # Sort classes alphabetically or by frequency for consistency
-    classes_sorted = sorted(class_counts.keys())
-    counts_sorted = [class_counts[cls] for cls in classes_sorted]
-
-    # Plot the histogram
-    plt.bar(classes_sorted, counts_sorted, tick_label=[f"{cls}" for cls in classes_sorted])
+    plt.bar(class_counts.keys(), class_counts.values())
     plt.xlabel("Class")
     plt.ylabel("Number of Samples")
     plt.title(title)
-    plt.xticks(rotation=45, ha='right')  # Rotate class names for better visibility if many
+    plt.xticks(rotation=45, ha='right')  # Rotate class names for better visibility
     plt.show()
 
 
@@ -77,9 +69,9 @@ def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, class_names=N
     y_true = np.array(y_true)
     y_pred_proba = np.array(y_pred_proba)
 
-    # Check if y_pred_proba sums to 1 (softmax probabilities)
-    if not np.allclose(y_pred_proba.sum(axis=1), 1, atol=1e-2):
-        raise ValueError("y_pred_proba should be softmax probabilities that sum to 1 across classes.")
+    # Check if y_pred_proba sums to 1 (softmax probabilities)TODO
+    #if not np.allclose(y_pred_proba.sum(axis=1), 1, atol=1e-2):
+     #   raise ValueError("y_pred_proba should be softmax probabilities that sum to 1 across classes.")
 
     # Determine number of classes
     n_classes = y_pred_proba.shape[1]
@@ -128,7 +120,6 @@ def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, class_names=N
     plt.grid(alpha=0.6)
     plt.tight_layout()
     plt.show()
-
 
 
 def plot_multiclass_roc_auc(y_true, y_pred_proba, title, class_labels=None):
@@ -216,4 +207,17 @@ def plot_metrics_table(results):
         else:
             cell.set_facecolor("white")
 
+    plt.show()
+
+
+def plot_histogram_confidence(y_pred_of_class, class_name, title):
+    # Define bin edges for fixed intervals [0, 0.05, 0.1, ..., 1.0]
+    bins = np.arange(0, 1.05, 0.05)  # Step size of 0.05
+
+    # Plot the histogram with specified bins
+    plt.hist(y_pred_of_class, bins=bins, edgecolor='black', alpha=0.7)
+    plt.xlim(0, 1)
+    plt.xlabel(f'Confidence of class {class_name}')
+    plt.ylabel("Number of Samples")
+    plt.title(title)
     plt.show()

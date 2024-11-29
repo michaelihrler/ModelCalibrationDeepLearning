@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
 from torchvision.models import resnet18, ResNet18_Weights
 import numpy as np
+from torchvision.models.detection import transform
 
 from data_utils import get_class_names
 from histgram_binning import HistogramBinning
@@ -26,6 +27,8 @@ class Model:
         self.val_loader = None
         self.train_loader = None
         self.create_data_loaders(batch_size, test_dir, train_dir, train_val_split_ratio)
+
+        self.train_dir = train_dir
 
         # Load a pretrained resnet
         self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
@@ -80,12 +83,6 @@ class Model:
                 f"Validation Loss: {val_loss:.4f}, "
                 f"Learning Rate: {self.optimizer.param_groups[0]['lr']}"
             )
-            if epoch % 5 == 0:
-                plot_multiclass_calibration_curve(
-                    y_true=true_labels,
-                    y_pred_proba=np.array(confidence_all_classes),
-                    title="Baseline Training"
-                )
 
             val_losses.append(val_loss)
 
@@ -170,7 +167,11 @@ class Model:
         self.val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=4)
         self.test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
-    def optimize_temperature(self):
+    def get_class_mappings(self):
+        train_dataset = ImageFolder(self.train_dir, transform=transform)
+        return train_dataset.class_to_idx
+
+    def optimize_temperature(self, lr=0.01):
         """
         Optimizes the temperature scaling model for multi-class logits.
         :return: The optimized TemperatureScaling model.
@@ -178,7 +179,7 @@ class Model:
         temperature_model = TemperatureScaling().to(self.device)
         criterion = nn.CrossEntropyLoss()
 
-        optimizer = optim.LBFGS([temperature_model.temperature], lr=0.01, max_iter=50)
+        optimizer = optim.LBFGS([temperature_model.temperature], lr=lr, max_iter=50)
 
         logits_list = []
         labels_list = []
@@ -206,12 +207,12 @@ class Model:
         optimizer.step(closure)
         self.temperature_model = temperature_model
 
-    def optimize_platt_scaling(self):
+    def optimize_platt_scaling(self, lr=0.01, max_iter=50):
         num_classes = len(self.model.fc.weight)  # Number of output classes
         platt_scaling = PlattScaling(num_classes).to(self.device)
         criterion = nn.CrossEntropyLoss()  # Multi-class Cross-Entropy Loss
 
-        optimizer = optim.LBFGS([platt_scaling.w, platt_scaling.b], lr=0.01, max_iter=50)
+        optimizer = optim.LBFGS([platt_scaling.w, platt_scaling.b], lr=lr, max_iter=max_iter)
 
         logits_list = []
         labels_list = []
@@ -236,7 +237,7 @@ class Model:
         optimizer.step(closure)
         self.platt_scaling = platt_scaling
 
-    def optimize_histogram_binning(self):
+    def optimize_histogram_binning(self, n_bins=20):
         logits_list = []
         labels_list = []
 
@@ -256,7 +257,7 @@ class Model:
         labels_one_hot = np.eye(probabilities.shape[1])[labels.cpu().numpy()]
 
         # Fit histogram binning
-        histogram_binning = HistogramBinning(n_bins=10)
+        histogram_binning = HistogramBinning(n_bins=n_bins)
         histogram_binning.fit(probabilities, labels_one_hot)
         self.histogram_binning_model = histogram_binning
 
@@ -291,6 +292,3 @@ class Model:
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.to(self.device)
         print(f"Model loaded from {model_path}")
-
-    def temperature_model(self, logits_tensor):
-        pass
