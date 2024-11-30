@@ -7,18 +7,22 @@ from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
 from torchvision.models import resnet18, ResNet18_Weights
 import numpy as np
-from torchvision.models.detection import transform
-
+from beta_calibration import BetaCalibration
 from data_utils import get_class_names
 from histgram_binning import HistogramBinning
+from isotonic_calibration import IsotonicCalibration
 from platt_scaling import PlattScaling
 from plot_utils import plot_multiclass_calibration_curve
+from spile_calibration import SplineCalibration
 from temperature_scaling import TemperatureScaling
 
 
 class Model:
     def __init__(self, learning_rate, batch_size, patience_early_stopping, patience_reduce_learning_rate, train_dir,
                  test_dir, train_val_split_ratio, weight_decay=1e-4, momentum=0.9):
+        self.spline_calibration_model = None
+        self.beta_calibration_model = None
+        self.isotonic_calibration_model = None
         self.platt_scaling = None
         self.temperature_model = None
         self.histogram_binning_model = None
@@ -168,7 +172,7 @@ class Model:
         self.test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     def get_class_mappings(self):
-        train_dataset = ImageFolder(self.train_dir, transform=transform)
+        train_dataset = ImageFolder(self.train_dir)
         return train_dataset.class_to_idx
 
     def optimize_temperature(self, lr=0.01):
@@ -237,6 +241,30 @@ class Model:
         optimizer.step(closure)
         self.platt_scaling = platt_scaling
 
+    def optimize_isotonic_calibration(self):
+        logits_list = []
+        labels_list = []
+
+        # Collect logits and labels from validation data
+        with torch.no_grad():
+            for inputs, labels in self.val_loader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                logits = self.model(inputs)
+                logits_list.append(logits)
+                labels_list.append(labels)
+
+        logits = torch.cat(logits_list)  # Shape: [num_samples, num_classes]
+        labels = torch.cat(labels_list)  # Shape: [num_samples]
+
+        # Convert logits to probabilities
+        probabilities = torch.softmax(logits, dim=1).cpu().numpy()
+        true_labels = labels.cpu().numpy()
+
+        # Fit isotonic regression
+        isotonic_calibration = IsotonicCalibration()
+        isotonic_calibration.fit(probabilities, true_labels)
+        self.isotonic_calibration_model = isotonic_calibration
+
     def optimize_histogram_binning(self, n_bins=20):
         logits_list = []
         labels_list = []
@@ -261,6 +289,48 @@ class Model:
         histogram_binning.fit(probabilities, labels_one_hot)
         self.histogram_binning_model = histogram_binning
 
+    def optimize_beta_calibration(self):
+        logits_list = []
+        labels_list = []
+
+        with torch.no_grad():
+            for inputs, labels in self.val_loader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                logits = self.model(inputs)
+                logits_list.append(logits)
+                labels_list.append(labels)
+
+        logits = torch.cat(logits_list)
+        labels = torch.cat(labels_list)
+
+        probabilities = torch.softmax(logits, dim=1).cpu().numpy()
+        true_labels = labels.cpu().numpy()
+
+        beta_calibration = BetaCalibration()
+        beta_calibration.fit(probabilities, true_labels)
+        self.beta_calibration_model = beta_calibration
+
+    def optimize_spline_calibration(self, smoothing_factor=1.0):
+        logits_list = []
+        labels_list = []
+
+        with torch.no_grad():
+            for inputs, labels in self.val_loader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                logits = self.model(inputs)
+                logits_list.append(logits)
+                labels_list.append(labels)
+
+        logits = torch.cat(logits_list)
+        labels = torch.cat(labels_list)
+
+        probabilities = torch.softmax(logits, dim=1).cpu().numpy()
+        true_labels = labels.cpu().numpy()
+
+        spline_calibration = SplineCalibration()
+        spline_calibration.fit(probabilities, true_labels, smoothing_factor)
+        self.spline_calibration_model = spline_calibration
+
     def evaluate_with_platt_scaling(self, logits):
         logits_tensor = torch.tensor(logits).to(self.device)
 
@@ -284,6 +354,22 @@ class Model:
             calibrated_probabilities = self.histogram_binning_model.forward(probabilities)
         _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
         return predicted_tensor.tolist(), np.vstack(calibrated_probabilities)
+
+    def evaluate_with_isotonic_calibration(self, probabilities):
+        with torch.no_grad():
+            calibrated_probabilities = self.isotonic_calibration_model.forward(probabilities)
+        _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
+        return predicted_tensor.tolist(), np.vstack(calibrated_probabilities)
+
+    def evaluate_with_beta_calibration(self, probabilities):
+        calibrated_probabilities = self.beta_calibration_model.forward(probabilities)
+        _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
+        return predicted_tensor.tolist(), calibrated_probabilities
+
+    def evaluate_with_spline_calibration(self, probabilities):
+        calibrated_probabilities = self.spline_calibration_model.forward(probabilities)
+        _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
+        return predicted_tensor.tolist(), calibrated_probabilities
 
     def load_existing_model(self, model_path):
         if not os.path.exists(model_path):

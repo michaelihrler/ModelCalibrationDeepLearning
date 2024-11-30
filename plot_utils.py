@@ -44,7 +44,7 @@ def plot_confusion_matrix(true_labels, predicted_labels, title):
     plt.show()
 
 
-def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, class_names=None, n_bins=20, strategy='uniform'):
+def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, class_names=None, n_bins=10, strategy='uniform'):
     """
     Plots calibration curves for a multiclass or binary classifier with actual class names.
 
@@ -212,7 +212,7 @@ def plot_metrics_table(results):
 
 def plot_histogram_confidence(y_pred_of_class, class_name, title):
     # Define bin edges for fixed intervals [0, 0.05, 0.1, ..., 1.0]
-    bins = np.arange(0, 1.05, 0.05)  # Step size of 0.05
+    bins = np.arange(0, 1.05, 0.1)  # Step size of 0.05
 
     # Plot the histogram with specified bins
     plt.hist(y_pred_of_class, bins=bins, edgecolor='black', alpha=0.7)
