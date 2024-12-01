@@ -6,6 +6,7 @@ from sklearn.calibration import calibration_curve
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc
 from sklearn.preprocessing import label_binarize
 
+
 from data_utils import get_class_names
 
 
@@ -70,8 +71,8 @@ def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, class_names=N
     y_pred_proba = np.array(y_pred_proba)
 
     # Check if y_pred_proba sums to 1 (softmax probabilities)TODO
-    #if not np.allclose(y_pred_proba.sum(axis=1), 1, atol=1e-2):
-     #   raise ValueError("y_pred_proba should be softmax probabilities that sum to 1 across classes.")
+    # if not np.allclose(y_pred_proba.sum(axis=1), 1, atol=1e-2):
+    #   raise ValueError("y_pred_proba should be softmax probabilities that sum to 1 across classes.")
 
     # Determine number of classes
     n_classes = y_pred_proba.shape[1]
@@ -80,7 +81,6 @@ def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, class_names=N
     if n_classes == 2:
         y_true_binarized = y_true  # Binary classification, no binarization needed
     else:
-        from sklearn.preprocessing import label_binarize
         y_true_binarized = label_binarize(y_true, classes=np.arange(n_classes))
 
     # Set class names if not provided
@@ -98,6 +98,11 @@ def plot_multiclass_calibration_curve(y_true, y_pred_proba, title, class_names=N
             n_bins=n_bins,
             strategy=strategy
         )
+        # Print number of records in each bin
+        bin_edges = np.linspace(0, 1, n_bins + 1)
+        bin_counts, _ = np.histogram(y_pred_proba[:, 1], bins=bin_edges)
+        print(f"Bin counts for {class_names[1]}: {bin_counts}")
+
         plt.plot(prob_pred, prob_true, marker='o', label=class_names[1])
     else:
         # Multi-class classification

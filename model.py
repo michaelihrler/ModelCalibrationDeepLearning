@@ -1,6 +1,8 @@
 import os
 
 import torch
+from matplotlib.pyplot import title
+from sklearn.metrics import accuracy_score, f1_score
 from torch import optim, nn
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader, random_split
@@ -8,7 +10,7 @@ import torchvision.transforms as transforms
 from torchvision.models import resnet18, ResNet18_Weights
 import numpy as np
 from beta_calibration import BetaCalibration
-from data_utils import get_class_names
+from data_utils import get_class_names, calculate_ece, calculate_mce
 from histgram_binning import HistogramBinning
 from isotonic_calibration import IsotonicCalibration
 from platt_scaling import PlattScaling
@@ -42,7 +44,7 @@ class Model:
         class_names = get_class_names(train_dir)
         self.model.fc = nn.Linear(num_features, len(class_names))
 
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
         self.optimizer = optim.SGD(self.model.parameters(), lr=learning_rate, momentum=momentum,
                                    weight_decay=weight_decay)
 
@@ -81,12 +83,23 @@ class Model:
             true_labels, predicted_labels, confidence_all_classes, val_loss, logits = self.evaluate(
                 dataloader=self.val_loader)
 
+            ece = calculate_ece(true_labels, confidence_all_classes)
+            mce = calculate_mce(true_labels, confidence_all_classes)
+
+            acc = accuracy_score(true_labels, predicted_labels)
+            f1 = f1_score(true_labels, predicted_labels, average='macro', zero_division=0),
             print(
                 f"Epoch {epoch + 1}/{num_epochs}, "
                 f"Train Loss: {avg_train_loss:.4f}, "
                 f"Validation Loss: {val_loss:.4f}, "
-                f"Learning Rate: {self.optimizer.param_groups[0]['lr']}"
+                f"Learning Rate: {self.optimizer.param_groups[0]['lr']}, "
+                f"ECE: {ece:.4f}, "
+                f"MCE: {mce:.4f}, "
+                f"Acc: {acc:.4f}, "
+                f"F1: {f1:.4f}"
             )
+
+            plot_multiclass_calibration_curve(true_labels, confidence_all_classes, n_bins=20, title = "Calibration on Val Data during Training")
 
             val_losses.append(val_loss)
 

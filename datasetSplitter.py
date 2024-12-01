@@ -37,5 +37,5 @@ def split_data_set_binary_classification(n, src_dir, dest_dir):
         copy_n_random_files(os.path.join(src_dir, folder), dest_folder, n)
 
 
-split_data_set_binary_classification( 1200, "chest_xray/train", "train_data_chest_xray_balanced")
+split_data_set_binary_classification( 400, "chest_xray/train", "train_data_chest_xray_balanced1")
 #split_data_set_binary_classification(128, "chest_xray/test", "test_data_chest_xray_3_3_split")
