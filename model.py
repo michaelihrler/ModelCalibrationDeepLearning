@@ -7,7 +7,7 @@ from torch import optim, nn
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
-from torchvision.models import resnet18, ResNet18_Weights
+from torchvision.models import vgg16, VGG16_Weights
 import numpy as np
 from beta_calibration import BetaCalibration
 from data_utils import get_class_names, calculate_ece, calculate_mce
@@ -20,8 +20,10 @@ from temperature_scaling import TemperatureScaling
 
 
 class Model:
-    def __init__(self, learning_rate, batch_size, patience_early_stopping, patience_reduce_learning_rate, train_dir,
+    def __init__(self, learning_rate, batch_size, patience_early_stopping, patience_reduce_learning_rate,
+                 factor_reduce_learning_rate, train_dir,
                  test_dir, train_val_split_ratio, weight_decay=1e-4, momentum=0.9):
+        self.factor_reduce_learning_rate = factor_reduce_learning_rate
         self.spline_calibration_model = None
         self.beta_calibration_model = None
         self.isotonic_calibration_model = None
@@ -36,21 +38,30 @@ class Model:
 
         self.train_dir = train_dir
 
-        # Load a pretrained resnet
-        self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        # Load a pretrained VGG16 model
+        base_model = vgg16(weights = VGG16_Weights.IMAGENET1K_V1)
+        base_model.features = nn.Sequential(*list(base_model.features.children())[:30])  # Up to 'block5_conv3'
 
-        num_features = self.model.fc.in_features
+        # Add custom head
+        self.model = nn.Sequential(
+            base_model.features,
+            nn.AdaptiveAvgPool2d((1, 1)),  # GlobalAveragePooling2D equivalent
+            nn.Flatten(),
+            nn.Linear(512, len(get_class_names(train_dir)))  # Replace 512 with num_features if different
+        )
 
-        class_names = get_class_names(train_dir)
-        self.model.fc = nn.Linear(num_features, len(class_names))
+        self.model = self.model.to(self.device)
 
+        # Loss function and optimizer
         self.criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
         self.optimizer = optim.SGD(self.model.parameters(), lr=learning_rate, momentum=momentum,
                                    weight_decay=weight_decay)
 
         self.patience_early_stopping = patience_early_stopping
 
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.1,
+        # Learning rate scheduler
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min',
+                                                              factor=self.factor_reduce_learning_rate,
                                                               patience=patience_reduce_learning_rate)
 
     def train_model(self, num_epochs):
@@ -87,7 +98,7 @@ class Model:
             mce = calculate_mce(true_labels, confidence_all_classes)
 
             acc = accuracy_score(true_labels, predicted_labels)
-            f1 = f1_score(true_labels, predicted_labels, average='macro', zero_division=0),
+            f1 = f1_score(true_labels, predicted_labels, average='macro', zero_division=0)
             print(
                 f"Epoch {epoch + 1}/{num_epochs}, "
                 f"Train Loss: {avg_train_loss:.4f}, "
@@ -99,7 +110,8 @@ class Model:
                 f"F1: {f1:.4f}"
             )
 
-            plot_multiclass_calibration_curve(true_labels, confidence_all_classes, n_bins=20, title = "Calibration on Val Data during Training")
+            plot_multiclass_calibration_curve(true_labels, confidence_all_classes, n_bins=20,
+                                              title="Calibration on Val Data during Training")
 
             val_losses.append(val_loss)
 
@@ -225,7 +237,7 @@ class Model:
         self.temperature_model = temperature_model
 
     def optimize_platt_scaling(self, lr=0.01, max_iter=50):
-        num_classes = len(self.model.fc.weight)  # Number of output classes
+        num_classes = 2  #TODO Number of output classes
         platt_scaling = PlattScaling(num_classes).to(self.device)
         criterion = nn.CrossEntropyLoss()  # Multi-class Cross-Entropy Loss
 
