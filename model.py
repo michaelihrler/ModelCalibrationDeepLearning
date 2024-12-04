@@ -1,7 +1,9 @@
 import os
 
 import torch
-from matplotlib.pyplot import title
+
+from betacal import BetaCalibration
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from torch import optim, nn
 from torchvision.datasets import ImageFolder
@@ -9,13 +11,11 @@ from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
 from torchvision.models import vgg16, VGG16_Weights
 import numpy as np
-from beta_calibration import BetaCalibration
 from data_utils import get_class_names, calculate_ece, calculate_mce
 from histgram_binning import HistogramBinning
 from isotonic_calibration import IsotonicCalibration
-from platt_scaling import PlattScaling
-from plot_utils import plot_multiclass_calibration_curve
-from spile_calibration import SplineCalibration
+
+import ml_insights as mli
 from temperature_scaling import TemperatureScaling
 
 
@@ -91,8 +91,7 @@ class Model:
             train_losses.append(avg_train_loss)
 
             # Validation
-            true_labels, predicted_labels, confidence_all_classes, val_loss, logits = self.evaluate(
-                dataloader=self.val_loader)
+            true_labels, predicted_labels, confidence_all_classes, val_loss = self.evaluate(dataloader=self.val_loader)
 
             ece = calculate_ece(true_labels, confidence_all_classes)
             mce = calculate_mce(true_labels, confidence_all_classes)
@@ -109,9 +108,6 @@ class Model:
                 f"Acc: {acc:.4f}, "
                 f"F1: {f1:.4f}"
             )
-
-            plot_multiclass_calibration_curve(true_labels, confidence_all_classes, n_bins=20,
-                                              title="Calibration on Val Data during Training")
 
             val_losses.append(val_loss)
 
@@ -173,7 +169,7 @@ class Model:
         avg_loss = total_loss / len(dataloader)
         confidence_all_classes = np.vstack(confidence_all_classes)
 
-        return true_labels, predicted_labels, confidence_all_classes, avg_loss, logits
+        return true_labels, predicted_labels, confidence_all_classes, avg_loss
 
     def create_data_loaders(self, batch_size, test_dir, train_dir, train_val_split_ratio):
         transform = transforms.Compose([
@@ -236,35 +232,12 @@ class Model:
         optimizer.step(closure)
         self.temperature_model = temperature_model
 
-    def optimize_platt_scaling(self, lr=0.01, max_iter=50):
-        num_classes = 2  #TODO Number of output classes
-        platt_scaling = PlattScaling(num_classes).to(self.device)
-        criterion = nn.CrossEntropyLoss()  # Multi-class Cross-Entropy Loss
+    def optimize_platt_scaling(self, y_true, y_pred_confidence):
+        y_true = np.array(y_true)
+        y_pred_confidence = np.array(y_pred_confidence)
+        self.platt_scaling = LogisticRegression(C=99999999999, solver='lbfgs')
+        self.platt_scaling.fit(y_pred_confidence.reshape(-1, 1), y_true)
 
-        optimizer = optim.LBFGS([platt_scaling.w, platt_scaling.b], lr=lr, max_iter=max_iter)
-
-        logits_list = []
-        labels_list = []
-
-        with torch.no_grad():
-            for inputs, labels in self.val_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                logits = self.model(inputs)
-                logits_list.append(logits)
-                labels_list.append(labels)
-
-        logits = torch.cat(logits_list)  # Shape: [num_samples, num_classes]
-        labels = torch.cat(labels_list)  # Shape: [num_samples]
-
-        def closure():
-            optimizer.zero_grad()
-            scaled_logits = platt_scaling(logits)  # Calibrated probabilities
-            loss = criterion(scaled_logits, labels)
-            loss.backward()
-            return loss
-
-        optimizer.step(closure)
-        self.platt_scaling = platt_scaling
 
     def optimize_isotonic_calibration(self):
         logits_list = []
@@ -314,56 +287,26 @@ class Model:
         histogram_binning.fit(probabilities, labels_one_hot)
         self.histogram_binning_model = histogram_binning
 
-    def optimize_beta_calibration(self):
-        logits_list = []
-        labels_list = []
+    def optimize_beta_calibration(self, y_true, y_pred_confidence):
+        y_true = np.array(y_true)
+        y_pred_confidence = np.array(y_pred_confidence)
 
-        with torch.no_grad():
-            for inputs, labels in self.val_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                logits = self.model(inputs)
-                logits_list.append(logits)
-                labels_list.append(labels)
+        self.beta_calibration_model = BetaCalibration()
+        self.beta_calibration_model.fit(y_pred_confidence, y_true)
 
-        logits = torch.cat(logits_list)
-        labels = torch.cat(labels_list)
+    def optimize_spline_calibration(self, y_true, y_pred_confidence):
+        self.spline_calibration_model = mli.SplineCalib(
+            knot_sample_size=40,
+            cv_spline=5,
+            unity_prior=False,
+            unity_prior_weight=128)
+        self.spline_calibration_model.fit(y_pred_confidence, y_true)
 
-        probabilities = torch.softmax(logits, dim=1).cpu().numpy()
-        true_labels = labels.cpu().numpy()
-
-        beta_calibration = BetaCalibration()
-        beta_calibration.fit(probabilities, true_labels)
-        self.beta_calibration_model = beta_calibration
-
-    def optimize_spline_calibration(self, smoothing_factor=1.0):
-        logits_list = []
-        labels_list = []
-
-        with torch.no_grad():
-            for inputs, labels in self.val_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                logits = self.model(inputs)
-                logits_list.append(logits)
-                labels_list.append(labels)
-
-        logits = torch.cat(logits_list)
-        labels = torch.cat(labels_list)
-
-        probabilities = torch.softmax(logits, dim=1).cpu().numpy()
-        true_labels = labels.cpu().numpy()
-
-        spline_calibration = SplineCalibration()
-        spline_calibration.fit(probabilities, true_labels, smoothing_factor)
-        self.spline_calibration_model = spline_calibration
-
-    def evaluate_with_platt_scaling(self, logits):
-        logits_tensor = torch.tensor(logits).to(self.device)
-
-        with torch.no_grad():
-            calibrated_logits = self.platt_scaling(logits_tensor)
-            calibrated_probabilities = torch.softmax(calibrated_logits, dim=1).cpu().numpy()
+    def evaluate_with_platt_scaling(self, y_pred_confidence):
+        y_pred_confidence = np.array(y_pred_confidence)
+        calibrated_probabilities = self.platt_scaling.predict_proba(y_pred_confidence.reshape(-1,1))[:,1]
         _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
-        return predicted_tensor.tolist(), np.vstack(calibrated_probabilities)
+        return predicted_tensor.tolist(), calibrated_probabilities
 
     def evaluate_with_temperature_scaling(self, logits):
         logits_tensor = torch.tensor(logits).to(self.device)
@@ -386,13 +329,13 @@ class Model:
         _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
         return predicted_tensor.tolist(), np.vstack(calibrated_probabilities)
 
-    def evaluate_with_beta_calibration(self, probabilities):
-        calibrated_probabilities = self.beta_calibration_model.forward(probabilities)
+    def evaluate_with_beta_calibration(self, y_pred_confidence):
+        calibrated_probabilities = self.beta_calibration_model.predict(y_pred_confidence)
         _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
         return predicted_tensor.tolist(), calibrated_probabilities
 
-    def evaluate_with_spline_calibration(self, probabilities):
-        calibrated_probabilities = self.spline_calibration_model.forward(probabilities)
+    def evaluate_with_spline_calibration(self, y_pred_confidence):
+        calibrated_probabilities = self.spline_calibration_model.predict(y_pred_confidence)
         _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
         return predicted_tensor.tolist(), calibrated_probabilities
 
