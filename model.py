@@ -3,6 +3,8 @@ import os
 import torch
 
 from betacal import BetaCalibration
+from netcal.binning import HistogramBinning
+from netcal.scaling import TemperatureScaling
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from torch import optim, nn
@@ -12,11 +14,12 @@ import torchvision.transforms as transforms
 from torchvision.models import vgg16, VGG16_Weights
 import numpy as np
 from data_utils import get_class_names, calculate_ece, calculate_mce
-from histgram_binning import HistogramBinning
-from isotonic_calibration import IsotonicCalibration
+
+from sklearn.isotonic import IsotonicRegression
 
 import ml_insights as mli
-from temperature_scaling import TemperatureScaling
+
+
 
 
 class Model:
@@ -202,95 +205,30 @@ class Model:
         train_dataset = ImageFolder(self.train_dir)
         return train_dataset.class_to_idx
 
-    def optimize_temperature(self, lr=0.01):
-        """
-        Optimizes the temperature scaling model for multi-class logits.
-        :return: The optimized TemperatureScaling model.
-        """
-        temperature_model = TemperatureScaling().to(self.device)
-        criterion = nn.CrossEntropyLoss()
-
-        optimizer = optim.LBFGS([temperature_model.temperature], lr=lr, max_iter=50)
-
-        logits_list = []
-        labels_list = []
-
-        # Collect logits and labels from the validation set
-        with torch.no_grad():
-            for inputs, labels in self.val_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                logits = self.model(inputs)
-                logits_list.append(logits)
-                labels_list.append(labels)
-
-        logits = torch.cat(logits_list)  # Shape: [num_samples, num_classes]
-        labels = torch.cat(labels_list)  # Shape: [num_samples]
-
-        # Optimization closure for LBFGS
-        def closure():
-            optimizer.zero_grad()
-            scaled_logits = temperature_model(logits)
-            loss = criterion(scaled_logits, labels)
-            loss.backward()
-            return loss
-
-        # Perform optimization
-        optimizer.step(closure)
-        self.temperature_model = temperature_model
-
-    def optimize_platt_scaling(self, y_true, y_pred_confidence):
+    def optimize_temperature(self, y_true, y_pred_confidence):
         y_true = np.array(y_true)
         y_pred_confidence = np.array(y_pred_confidence)
-        self.platt_scaling = LogisticRegression(C=99999999999, solver='lbfgs')
+        self.temperature_model = TemperatureScaling()
+        self.temperature_model.fit(y_pred_confidence, y_true)
+
+
+    def optimize_platt_scaling(self, y_true, y_pred_confidence, regularisation):
+        y_true = np.array(y_true)
+        y_pred_confidence = np.array(y_pred_confidence)
+        self.platt_scaling = LogisticRegression(C=regularisation, solver='lbfgs')
         self.platt_scaling.fit(y_pred_confidence.reshape(-1, 1), y_true)
 
-    def optimize_isotonic_calibration(self):
-        logits_list = []
-        labels_list = []
+    def optimize_isotonic_calibration(self, y_true, y_pred_confidence):
+        y_true = np.array(y_true)
+        y_pred_confidence = np.array(y_pred_confidence)
+        self.isotonic_calibration_model = IsotonicRegression(out_of_bounds='clip')
+        self.isotonic_calibration_model.fit(y_pred_confidence, y_true)
 
-        # Collect logits and labels from validation data
-        with torch.no_grad():
-            for inputs, labels in self.val_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                logits = self.model(inputs)
-                logits_list.append(logits)
-                labels_list.append(labels)
-
-        logits = torch.cat(logits_list)  # Shape: [num_samples, num_classes]
-        labels = torch.cat(labels_list)  # Shape: [num_samples]
-
-        # Convert logits to probabilities
-        probabilities = torch.softmax(logits, dim=1).cpu().numpy()
-        true_labels = labels.cpu().numpy()
-
-        # Fit isotonic regression
-        isotonic_calibration = IsotonicCalibration()
-        isotonic_calibration.fit(probabilities, true_labels)
-        self.isotonic_calibration_model = isotonic_calibration
-
-    def optimize_histogram_binning(self, n_bins=20):
-        logits_list = []
-        labels_list = []
-
-        # Collect logits and labels from validation data
-        with torch.no_grad():
-            for inputs, labels in self.val_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                logits = self.model(inputs)
-                logits_list.append(logits)
-                labels_list.append(labels)
-
-        logits = torch.cat(logits_list)  # Shape: [num_samples, num_classes]
-        labels = torch.cat(labels_list)  # Shape: [num_samples]
-
-        # Convert logits to probabilities
-        probabilities = torch.softmax(logits, dim=1).cpu().numpy()
-        labels_one_hot = np.eye(probabilities.shape[1])[labels.cpu().numpy()]
-
-        # Fit histogram binning
-        histogram_binning = HistogramBinning(n_bins=n_bins)
-        histogram_binning.fit(probabilities, labels_one_hot)
-        self.histogram_binning_model = histogram_binning
+    def optimize_histogram_binning(self, y_true, y_pred_confidence, n_bins=20):
+        y_true = np.array(y_true)
+        y_pred_confidence = np.array(y_pred_confidence)
+        self.histogram_binning_model = HistogramBinning(bins=n_bins)
+        self.histogram_binning_model.fit(y_pred_confidence, y_true)
 
     def optimize_beta_calibration(self, y_true, y_pred_confidence):
         y_true = np.array(y_true)
@@ -314,26 +252,36 @@ class Model:
         predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
         return predicted_tensor.tolist(), convert_1d_probs_to_2d_probs(calibrated_probabilities)
 
-    def evaluate_with_temperature_scaling(self, logits):
-        logits_tensor = torch.tensor(logits).to(self.device)
+    def evaluate_with_temperature_scaling(self, y_pred_confidence):
+        y_pred_confidence = np.array(y_pred_confidence)
+        calibrated_probabilities = self.temperature_model.transform(y_pred_confidence)
 
-        with torch.no_grad():
-            calibrated_logits = self.temperature_model(logits_tensor)
-            calibrated_probabilities = torch.softmax(calibrated_logits, dim=1).cpu().numpy()
-        _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
-        return predicted_tensor.tolist(), np.vstack(calibrated_probabilities)
+        # Convert calibrated probabilities into a 2D array
+        calibrated_probabilities_2d = convert_1d_probs_to_2d_probs(calibrated_probabilities)
+        predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
 
-    def evaluate_with_histogram_binning(self, probabilities):
-        with torch.no_grad():
-            calibrated_probabilities = self.histogram_binning_model.forward(probabilities)
-        _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
-        return predicted_tensor.tolist(), np.vstack(calibrated_probabilities)
+        return predicted_tensor.tolist(), calibrated_probabilities_2d
 
-    def evaluate_with_isotonic_calibration(self, probabilities):
-        with torch.no_grad():
-            calibrated_probabilities = self.isotonic_calibration_model.forward(probabilities)
-        _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
-        return predicted_tensor.tolist(), np.vstack(calibrated_probabilities)
+    def evaluate_with_histogram_binning(self, y_pred_confidence):
+        y_pred_confidence = np.array(y_pred_confidence)
+        calibrated_probabilities = self.histogram_binning_model.transform(y_pred_confidence)
+
+        # Convert calibrated probabilities into a 2D array
+        calibrated_probabilities_2d = convert_1d_probs_to_2d_probs(calibrated_probabilities)
+        predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
+
+        return predicted_tensor.tolist(), calibrated_probabilities_2d
+
+    def evaluate_with_isotonic_calibration(self, y_pred_confidence):
+        y_pred_confidence = np.array(y_pred_confidence)
+        calibrated_probabilities = self.isotonic_calibration_model.predict(y_pred_confidence)
+
+        # Convert calibrated probabilities into a 2D array
+        calibrated_probabilities_2d = convert_1d_probs_to_2d_probs(calibrated_probabilities)
+        # Apply a threshold of 0.5 to get predicted labels
+        predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
+
+        return predicted_tensor.tolist(), calibrated_probabilities_2d
 
     def evaluate_with_beta_calibration(self, y_pred_confidence):
         calibrated_probabilities = self.beta_calibration_model.predict(y_pred_confidence)

@@ -36,13 +36,50 @@ def plot_loss(train_loss, val_loss):
     plt.show()
 
 
+from sklearn.metrics import (
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    precision_score,
+    recall_score,
+    f1_score,
+    accuracy_score,
+)
+
+
 def plot_confusion_matrix(true_labels, predicted_labels, title):
-    unique_classes = np.unique(true_labels + predicted_labels)
-    cm = confusion_matrix(true_labels, predicted_labels, labels=unique_classes)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=unique_classes)
+    """
+    Plots the confusion matrix with labels NORMAL and PNEUMONIA and computes F1-score, precision, recall, and accuracy.
+
+    Parameters:
+        true_labels (array-like): Ground truth (binary) target values (0 for NORMAL, 1 for PNEUMONIA).
+        predicted_labels (array-like): Predicted labels (0 for NORMAL, 1 for PNEUMONIA).
+        title (str): Title for the confusion matrix plot.
+
+    Returns:
+        f1 (float): F1-score.
+        precision (float): Precision score.
+        recall (float): Recall score.
+        accuracy (float): Accuracy score.
+    """
+    # Define class labels
+    class_labels = ["NORMAL", "PNEUMONIA"]
+
+    # Compute confusion matrix
+    cm = confusion_matrix(true_labels, predicted_labels, labels=[0, 1])
+
+    # Plot confusion matrix with proper labels
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=class_labels)
     disp.plot(cmap=plt.cm.Blues)
     plt.title(title)
     plt.show()
+
+    # Calculate metrics
+    f1 = f1_score(true_labels, predicted_labels, average='binary')
+    precision = precision_score(true_labels, predicted_labels, average='binary')
+    recall = recall_score(true_labels, predicted_labels, average='binary')
+    accuracy = accuracy_score(true_labels, predicted_labels)
+
+    return f1, precision, recall, accuracy
 
 
 def plot_multiple_calibration_curves(true_labels, y_pred_proba_list, labels, title, n_bins=10, strategy='uniform'):
@@ -184,6 +221,7 @@ def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
     """
     # Convert to array if list provided
     true_labels = np.array(true_labels)
+
     # Separate predicted probabilities by class
     probabilities_0 = predicted_probabilities[true_labels == 0]
     probabilities_1 = predicted_probabilities[true_labels == 1]
@@ -200,11 +238,18 @@ def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
     plt.show()
 
     # Compute calibration curve
-    prob_true, prob_pred = calibration_curve(true_labels, predicted_probabilities, n_bins=n_bins)
+    prob_true, prob_pred = calibration_curve(true_labels, predicted_probabilities, n_bins=n_bins, strategy='uniform')
+
+    # Calculate bin weights
+    bin_counts = np.histogram(predicted_probabilities, bins=n_bins, range=(0, 1))[0]
+
+    # Only include non-zero bins (to align with calibration_curve output)
+    valid_bins = bin_counts > 0
+    bin_weights = bin_counts[valid_bins]
 
     # Calculate ECE and MCE
     bin_errors = np.abs(prob_true - prob_pred)
-    ece = np.average(bin_errors, weights=np.histogram(predicted_probabilities, bins=n_bins)[0])
+    ece = np.average(bin_errors, weights=bin_weights)
     mce = np.max(bin_errors)
 
     return ece, mce
@@ -266,4 +311,3 @@ def plot_pr_curve(true_labels, predicted_probabilities, model_label='Model'):
     plt.show()
 
     return best_threshold, best_f1, pr_auc
-
