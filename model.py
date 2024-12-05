@@ -20,9 +20,10 @@ from temperature_scaling import TemperatureScaling
 
 
 class Model:
-    def __init__(self, learning_rate, batch_size, patience_early_stopping, patience_reduce_learning_rate,
-                 factor_reduce_learning_rate, train_dir,
-                 test_dir, train_val_split_ratio, weight_decay=1e-4, momentum=0.9):
+    def __init__(self, train_dir,
+                 test_dir, learning_rate=0.001, batch_size=32, patience_early_stopping=10,
+                 patience_reduce_learning_rate=4,
+                 factor_reduce_learning_rate=0.1, train_val_split_ratio=0.8, weight_decay=1e-4, momentum=0.9):
         self.factor_reduce_learning_rate = factor_reduce_learning_rate
         self.spline_calibration_model = None
         self.beta_calibration_model = None
@@ -39,7 +40,7 @@ class Model:
         self.train_dir = train_dir
 
         # Load a pretrained VGG16 model
-        base_model = vgg16(weights = VGG16_Weights.IMAGENET1K_V1)
+        base_model = vgg16(weights=VGG16_Weights.IMAGENET1K_V1)
         base_model.features = nn.Sequential(*list(base_model.features.children())[:30])  # Up to 'block5_conv3'
 
         # Add custom head
@@ -243,7 +244,6 @@ class Model:
         self.platt_scaling = LogisticRegression(C=99999999999, solver='lbfgs')
         self.platt_scaling.fit(y_pred_confidence.reshape(-1, 1), y_true)
 
-
     def optimize_isotonic_calibration(self):
         logits_list = []
         labels_list = []
@@ -309,9 +309,10 @@ class Model:
 
     def evaluate_with_platt_scaling(self, y_pred_confidence):
         y_pred_confidence = np.array(y_pred_confidence)
-        calibrated_probabilities = self.platt_scaling.predict_proba(y_pred_confidence.reshape(-1,1))[:,1]
-        _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
-        return predicted_tensor.tolist(), calibrated_probabilities
+        calibrated_probabilities = self.platt_scaling.predict_proba(y_pred_confidence.reshape(-1, 1))[:, 1]
+        # Apply a threshold of 0.5 to get predicted labels
+        predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
+        return predicted_tensor.tolist(), convert_1d_probs_to_2d_probs(calibrated_probabilities)
 
     def evaluate_with_temperature_scaling(self, logits):
         logits_tensor = torch.tensor(logits).to(self.device)
@@ -336,13 +337,15 @@ class Model:
 
     def evaluate_with_beta_calibration(self, y_pred_confidence):
         calibrated_probabilities = self.beta_calibration_model.predict(y_pred_confidence)
-        _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
-        return predicted_tensor.tolist(), calibrated_probabilities
+        # Apply a threshold of 0.5 to get predicted labels
+        predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
+        return predicted_tensor.tolist(), convert_1d_probs_to_2d_probs(calibrated_probabilities)
 
     def evaluate_with_spline_calibration(self, y_pred_confidence):
         calibrated_probabilities = self.spline_calibration_model.predict(y_pred_confidence)
-        _, predicted_tensor = torch.max(torch.tensor(calibrated_probabilities), dim=1)
-        return predicted_tensor.tolist(), calibrated_probabilities
+        # Apply a threshold of 0.5 to get predicted labels
+        predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
+        return predicted_tensor.tolist(), convert_1d_probs_to_2d_probs(calibrated_probabilities)
 
     def load_existing_model(self, model_path):
         if not os.path.exists(model_path):
@@ -351,3 +354,11 @@ class Model:
         self.model.load_state_dict(torch.load(model_path, map_location=self.device))
         self.model.to(self.device)
         print(f"Model loaded from {model_path}")
+
+
+def convert_1d_probs_to_2d_probs(probs):
+    probs_2d = np.column_stack((
+        1 - probs,  # Inverted probabilities
+        probs  # Original probabilities
+    ))
+    return probs_2d

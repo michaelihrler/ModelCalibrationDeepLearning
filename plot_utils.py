@@ -3,9 +3,9 @@ import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.calibration import calibration_curve
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc, roc_auc_score, \
+    precision_recall_curve
 from sklearn.preprocessing import label_binarize
-
 
 from data_utils import get_class_names
 
@@ -45,18 +45,21 @@ def plot_confusion_matrix(true_labels, predicted_labels, title):
     plt.show()
 
 
-def plot_multiple_calibration_curves(y_true, y_pred_proba_list, labels, title, n_bins=10, strategy='uniform'):
+def plot_multiple_calibration_curves(true_labels, y_pred_proba_list, labels, title, n_bins=10, strategy='uniform'):
     """
     Plots multiple calibration curves on the same plot with a shared y_true.
 
     Parameters:
-        y_true (array): The ground truth array (shared for all models).
+        true_labels (array): The ground truth array (shared for all models).
         y_pred_proba_list (list): A list of predicted probability arrays (one for each model).
         labels (list): A list of labels for each model/curve.
         title (str): The title of the plot.
         n_bins (int): Number of bins to use in the calibration curve.
         strategy (str): Strategy for binning ('uniform' or 'quantile').
     """
+    # Convert to array if list provided
+    true_labels = np.array(true_labels)
+
     plt.figure(figsize=(10, 7))
 
     for y_pred_proba, label in zip(y_pred_proba_list, labels):
@@ -64,8 +67,8 @@ def plot_multiple_calibration_curves(y_true, y_pred_proba_list, labels, title, n
 
         # Compute calibration curve
         prob_true, prob_pred = calibration_curve(
-            y_true,
-            y_pred_proba,  # Use the positive class probabilities
+            true_labels,
+            y_pred_proba,
             n_bins=n_bins,
             strategy=strategy
         )
@@ -85,57 +88,49 @@ def plot_multiple_calibration_curves(y_true, y_pred_proba_list, labels, title, n
     plt.show()
 
 
-def plot_multiclass_roc_auc(y_true, y_pred_proba, title, class_labels=None):
+from sklearn.metrics import roc_curve
+
+
+def plot_roc_curve(true_labels, predicted_probabilities, model_label):
     """
-    Plots the ROC AUC curve for a multiclass or binary classifier.
+    Plots the Receiver Operating Characteristic (ROC) curve for the model.
 
     Parameters:
-    - y_true: array-like of shape (n_samples,)
-        True labels for the samples.
-    - y_pred_proba: array-like of shape (n_samples, n_classes)
-        Predicted probabilities for each class.
-    - class_labels: list or array-like, default=None
-        Class labels to display in the legend. If None, use integers [0, ..., n_classes-1].
+        true_labels (array-like): True binary labels.
+        predicted_probabilities (array-like): Predicted probabilities for the positive class.
+        model_label (str): Label for the model in the legend
     """
-    # Ensure y_true is a numpy array
-    y_true = np.array(y_true)
+    # Convert to array if list provided
+    true_labels = np.array(true_labels)
+    # Calculate False Positive Rate, True Positive Rate, and G-means
+    fpr, tpr, thresholds = roc_curve(true_labels, predicted_probabilities)
+    gmeans = np.sqrt(tpr * (1 - fpr))
+    optimal_ix = np.argmax(gmeans)  # Optimal threshold index
 
-    # Determine the number of classes
-    n_classes = y_pred_proba.shape[1] if len(y_pred_proba.shape) > 1 else 2
+    plt.figure(figsize=(15, 10), dpi=400)
 
-    # Handle binary classification
-    if n_classes == 2:
-        # Binary classification: No need for one-hot encoding
-        fpr, tpr, _ = roc_curve(y_true, y_pred_proba[:, 1])  # Use probabilities for class 1
-        roc_auc = auc(fpr, tpr)
-        plt.figure(figsize=(10, 7))
-        plt.plot(fpr, tpr, label=f'Class 1 (AUC = {roc_auc:.2f})')
-    else:
-        # Multiclass classification: One-hot encode y_true
-        y_true_binarized = label_binarize(y_true, classes=np.arange(n_classes))
+    # Plotting no-skill line
+    plt.plot([0, 1], [0, 1], linestyle='--', color='gray', lw=2, label='No Skill')
 
-        # Set class labels if not provided
-        if class_labels is None:
-            class_labels = [f'Class {i}' for i in range(n_classes)]
+    # Plotting the ROC curve
+    plt.plot(fpr, tpr, marker='.', markersize=12, markerfacecolor='green',
+             linewidth=4, color='red', label=model_label)
 
-        # Initialize plot
-        plt.figure(figsize=(10, 7))
+    # Highlighting the optimal point
+    plt.scatter(fpr[optimal_ix], tpr[optimal_ix], marker='X', s=300, color='blue', label='Optimal Threshold')
 
-        # Plot ROC curve for each class
-        for i in range(n_classes):
-            fpr, tpr, _ = roc_curve(y_true_binarized[:, i], y_pred_proba[:, i])
-            roc_auc = auc(fpr, tpr)
-            plt.plot(fpr, tpr, label=f'{class_labels[i]} (AUC = {roc_auc:.2f})')
-
-    # Plot the diagonal line (no skill)
-    plt.plot([0, 1], [0, 1], linestyle='--', color='black', label='Random')
-
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title(title)
-    plt.legend(loc='best')
-    plt.grid()
+    # Adding grid, ticks, and styling
+    plt.grid(which='both', linestyle='--', linewidth=0.5, alpha=0.7)
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.xlabel('False Positive Rate', fontsize=20)
+    plt.ylabel('True Positive Rate', fontsize=20)
+    plt.title('Receiver Operating Characteristic (ROC) Curve', fontsize=24)
+    plt.legend(loc="lower right", prop={"size": 20})
     plt.show()
+
+    auc_score = roc_auc_score(true_labels, predicted_probabilities)
+    return auc_score
 
 
 def plot_metrics_table(results):
@@ -173,32 +168,102 @@ def plot_metrics_table(results):
     plt.show()
 
 
-def plot_histogram_confidence(y_pred_of_class, class_name, title):
-    # Define bin edges for fixed intervals [0, 0.05, 0.1, ..., 1.0]
-    bins = np.arange(0, 1.05, 0.1)  # Step size of 0.05
+def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
+    """
+    Plots a histogram of predicted probabilities for the two classes (y==0 and y==1).
+    Calculates and returns Expected Calibration Error (ECE) and Maximum Calibration Error (MCE).
 
-    # Plot the histogram with specified bins
-    plt.hist(y_pred_of_class, bins=bins, edgecolor='black', alpha=0.7)
-    plt.xlim(0, 1)
-    plt.xlabel(f'Confidence of class {class_name}')
-    plt.ylabel("Number of Samples")
-    plt.title(title)
+    Parameters:
+        true_labels (array-like): Ground truth binary labels (0 or 1).
+        predicted_probabilities (array-like): Predicted probabilities for the positive class.
+        n_bins (int): Number of bins to divide the predicted probabilities. Default is 10.
+
+    Returns:
+        ece (float): Expected Calibration Error.
+        mce (float): Maximum Calibration Error.
+    """
+    # Convert to array if list provided
+    true_labels = np.array(true_labels)
+    # Separate predicted probabilities by class
+    probabilities_0 = predicted_probabilities[true_labels == 0]
+    probabilities_1 = predicted_probabilities[true_labels == 1]
+
+    # Plot histogram
+    plt.figure(figsize=(10, 6))
+    plt.hist(probabilities_0, bins=n_bins, alpha=0.6, label='y==0', color='blue')
+    plt.hist(probabilities_1, bins=n_bins, alpha=0.6, label='y==1', color='orange')
+    plt.legend()
+    plt.xlabel('Predicted Probability')
+    plt.ylabel('Count')
+    plt.title('Histogram of Predicted Probabilities by Class')
+    plt.grid(True, linestyle='--', alpha=0.7)
     plt.show()
 
+    # Compute calibration curve
+    prob_true, prob_pred = calibration_curve(true_labels, predicted_probabilities, n_bins=n_bins)
+
+    # Calculate ECE and MCE
+    bin_errors = np.abs(prob_true - prob_pred)
+    ece = np.average(bin_errors, weights=np.histogram(predicted_probabilities, bins=n_bins)[0])
+    mce = np.max(bin_errors)
+
+    return ece, mce
 
 
-y_pred_proba_1 = [0.1, 0.9, 0.2, 0.8, 0.3, 0.7, 0.4, 0.6, 0.5, 0.5]
+def plot_pr_curve(true_labels, predicted_probabilities, model_label='Model'):
+    """
+    Plots the Precision-Recall (PR) curve for the model and calculates the optimal threshold, F1-score, and AUC.
 
-y_true_2 = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
-y_pred_proba_2 = [0.2, 0.8, 0.3, 0.7, 0.4, 0.6, 0.5, 0.5, 0.6, 0.4]
-y_pred_proba_3 = [0.2, 0.8, 0.3, 0.7, 0.8, 0.6, 0.5, 0.5, 0.6, 0.4]
+    Parameters:
+        true_labels (array-like): Ground truth (binary) target values.
+        predicted_probabilities (array-like): Predicted probabilities for the positive class.
+        model_label (str): Label for the model in the legend. Default is 'Model'.
 
-labels = ['Model 1', 'Model 2', "Modael"]
+    Returns:
+        best_threshold (float): Threshold corresponding to the best F1-score.
+        best_f1 (float): Best F1-score across all thresholds.
+        pr_auc (float): Area under the Precision-Recall curve.
+    """
+    # Convert to array if list provided
+    true_labels = np.array(true_labels)
+    # Calculate precision, recall, and thresholds
+    precision, recall, thresholds_pr = precision_recall_curve(true_labels, predicted_probabilities)
 
-# Plot multiple curves
-plot_multiple_calibration_curves(
-    y_true=y_true_2,
-    y_pred_proba_list=[y_pred_proba_1, y_pred_proba_2, y_pred_proba_3],
-    labels=labels,
-    title="Calibration Curve for Multiple Models"
-)
+    # Compute F1 scores
+    f1_scores = (2 * precision * recall) / (precision + recall)
+
+    # Handle potential NaN values due to division by zero
+    f1_scores = np.nan_to_num(f1_scores)
+
+    # Find the optimal threshold (max F1 score)
+    optimal_ix = np.argmax(f1_scores)
+    best_f1 = f1_scores[optimal_ix]
+
+    # Note: `precision_recall_curve` produces one fewer threshold than precision/recall
+    if optimal_ix < len(thresholds_pr):
+        best_threshold = thresholds_pr[optimal_ix]
+    else:
+        best_threshold = 1.0  # Handle edge cases where no valid threshold exists
+
+    # Compute area under the PR curve
+    pr_auc = auc(recall, precision)
+
+    # Plot the PR curve
+    no_skill = len(true_labels[true_labels == 1]) / len(true_labels)  # No-skill line
+    plt.figure(figsize=(15, 10), dpi=400)
+    plt.plot([0, 1], [no_skill, no_skill], linestyle='--', label='No Skill', color='gray')
+    plt.plot(recall, precision, marker='.', color='red', label=model_label)
+    plt.scatter(recall[optimal_ix], precision[optimal_ix], marker='X', s=300, color='blue', label='Optimal Threshold')
+
+    # Adding grid, ticks, and styling
+    plt.grid(which='both', linestyle='--', linewidth=0.5, alpha=0.7)
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+    plt.xlabel('Recall', fontsize=20)
+    plt.ylabel('Precision', fontsize=20)
+    plt.title('Precision-Recall Curve', fontsize=24)
+    plt.legend(loc="lower right", prop={"size": 20})
+    plt.show()
+
+    return best_threshold, best_f1, pr_auc
+
