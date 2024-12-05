@@ -45,24 +45,33 @@ def plot_confusion_matrix(true_labels, predicted_labels, title):
     plt.show()
 
 
-def plot_binary_calibration_curve(y_true, y_pred_proba, title, class_names=None, n_bins=10, strategy='uniform'):
-    y_true = np.array(y_true)
-    y_pred_proba = np.array(y_pred_proba)
+def plot_multiple_calibration_curves(y_true, y_pred_proba_list, labels, title, n_bins=10, strategy='uniform'):
+    """
+    Plots multiple calibration curves on the same plot with a shared y_true.
 
-    # Plot calibration curve
+    Parameters:
+        y_true (array): The ground truth array (shared for all models).
+        y_pred_proba_list (list): A list of predicted probability arrays (one for each model).
+        labels (list): A list of labels for each model/curve.
+        title (str): The title of the plot.
+        n_bins (int): Number of bins to use in the calibration curve.
+        strategy (str): Strategy for binning ('uniform' or 'quantile').
+    """
     plt.figure(figsize=(10, 7))
 
-    prob_true, prob_pred = calibration_curve(
+    for y_pred_proba, label in zip(y_pred_proba_list, labels):
+        y_pred_proba = np.array(y_pred_proba)
+
+        # Compute calibration curve
+        prob_true, prob_pred = calibration_curve(
             y_true,
             y_pred_proba,  # Use the positive class probabilities
             n_bins=n_bins,
             strategy=strategy
         )
-    bin_edges = np.linspace(0, 1, n_bins + 1)
-    bin_counts, _ = np.histogram(y_pred_proba, bins=bin_edges)
-    print(f"Bin counts {bin_counts}")
 
-    plt.plot(prob_pred, prob_true, marker='o')
+        # Plot the curve
+        plt.plot(prob_pred, prob_true, marker='o', label=label)
 
     # Plot the perfect calibration line
     plt.plot([0, 1], [0, 1], linestyle='--', color='black', label='Perfect calibration')
@@ -175,3 +184,21 @@ def plot_histogram_confidence(y_pred_of_class, class_name, title):
     plt.ylabel("Number of Samples")
     plt.title(title)
     plt.show()
+
+
+
+y_pred_proba_1 = [0.1, 0.9, 0.2, 0.8, 0.3, 0.7, 0.4, 0.6, 0.5, 0.5]
+
+y_true_2 = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+y_pred_proba_2 = [0.2, 0.8, 0.3, 0.7, 0.4, 0.6, 0.5, 0.5, 0.6, 0.4]
+y_pred_proba_3 = [0.2, 0.8, 0.3, 0.7, 0.8, 0.6, 0.5, 0.5, 0.6, 0.4]
+
+labels = ['Model 1', 'Model 2', "Modael"]
+
+# Plot multiple curves
+plot_multiple_calibration_curves(
+    y_true=y_true_2,
+    y_pred_proba_list=[y_pred_proba_1, y_pred_proba_2, y_pred_proba_3],
+    labels=labels,
+    title="Calibration Curve for Multiple Models"
+)

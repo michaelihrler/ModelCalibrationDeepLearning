@@ -182,9 +182,14 @@ class Model:
         train_dataset = ImageFolder(train_dir, transform=transform)
         test_dataset = ImageFolder(test_dir, transform=transform)
 
-        # Split train set in train_set and val_set
+        # Ensure split is all the Time the same! Important!
+        torch.manual_seed(42)
+
+        # Define train-validation split
         train_size = int(train_val_split_ratio * len(train_dataset))
         val_size = len(train_dataset) - train_size
+
+        # Perform the split
         train_subset, val_subset = random_split(train_dataset, [train_size, val_size])
 
         # Create data loaders for each subset
