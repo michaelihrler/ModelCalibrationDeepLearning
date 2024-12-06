@@ -221,6 +221,7 @@ def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
     """
     # Convert to array if list provided
     true_labels = np.array(true_labels)
+    predicted_probabilities = np.array(predicted_probabilities)
 
     # Separate predicted probabilities by class
     probabilities_0 = predicted_probabilities[true_labels == 0]
@@ -228,8 +229,8 @@ def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
 
     # Plot histogram
     plt.figure(figsize=(10, 6))
-    plt.hist(probabilities_0, bins=n_bins, alpha=0.6, label='y==0', color='blue')
-    plt.hist(probabilities_1, bins=n_bins, alpha=0.6, label='y==1', color='orange')
+    plt.hist(probabilities_0, bins=n_bins, alpha=0.6, label='y==0', color='blue', range=(0, 1))
+    plt.hist(probabilities_1, bins=n_bins, alpha=0.6, label='y==1', color='orange', range=(0, 1))
     plt.legend()
     plt.xlabel('Predicted Probability')
     plt.ylabel('Count')
@@ -241,18 +242,23 @@ def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
     prob_true, prob_pred = calibration_curve(true_labels, predicted_probabilities, n_bins=n_bins, strategy='uniform')
 
     # Calculate bin weights
-    bin_counts = np.histogram(predicted_probabilities, bins=n_bins, range=(0, 1))[0]
+    bin_counts, _ = np.histogram(predicted_probabilities, bins=n_bins, range=(0, 1))
+    bin_weights = bin_counts / bin_counts.sum()  # Normalize weights
 
-    # Only include non-zero bins (to align with calibration_curve output)
+    # Align bin_weights with valid bins
     valid_bins = bin_counts > 0
-    bin_weights = bin_counts[valid_bins]
+    bin_errors = np.abs(prob_true - prob_pred)
+    bin_weights = bin_weights[valid_bins]
+
+    # Ensure shapes align
+    assert len(bin_errors) == len(bin_weights), "Mismatch between bin errors and weights."
 
     # Calculate ECE and MCE
-    bin_errors = np.abs(prob_true - prob_pred)
-    ece = np.average(bin_errors, weights=bin_weights)
+    ece = np.sum(bin_errors * bin_weights)  # Weighted average
     mce = np.max(bin_errors)
 
     return ece, mce
+
 
 
 def plot_pr_curve(true_labels, predicted_probabilities, model_label='Model'):

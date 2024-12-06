@@ -9,7 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from torch import optim, nn
 from torchvision.datasets import ImageFolder
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from torchvision.models import vgg16, VGG16_Weights
 import numpy as np
@@ -23,10 +23,10 @@ import ml_insights as mli
 
 
 class Model:
-    def __init__(self, train_dir,
+    def __init__(self, train_dir, val_dir,
                  test_dir, learning_rate=0.001, batch_size=32, patience_early_stopping=10,
                  patience_reduce_learning_rate=4,
-                 factor_reduce_learning_rate=0.1, train_val_split_ratio=0.8, weight_decay=1e-4, momentum=0.9):
+                 factor_reduce_learning_rate=0.1, weight_decay=1e-4, momentum=0.9):
         self.factor_reduce_learning_rate = factor_reduce_learning_rate
         self.spline_calibration_model = None
         self.beta_calibration_model = None
@@ -38,7 +38,7 @@ class Model:
         self.test_loader = None
         self.val_loader = None
         self.train_loader = None
-        self.create_data_loaders(batch_size, test_dir, train_dir, train_val_split_ratio)
+        self.create_data_loaders(batch_size, test_dir, train_dir, val_dir)
 
         self.train_dir = train_dir
 
@@ -105,12 +105,12 @@ class Model:
             print(
                 f"Epoch {epoch + 1}/{num_epochs}, "
                 f"Train Loss: {avg_train_loss:.4f}, "
-                f"Validation Loss: {val_loss:.4f}, "
+                f"Val Loss: {val_loss:.4f}, "
                 f"Learning Rate: {self.optimizer.param_groups[0]['lr']}, "
-                f"ECE: {ece:.4f}, "
-                f"MCE: {mce:.4f}, "
-                f"Acc: {acc:.4f}, "
-                f"F1: {f1:.4f}"
+                f"Val ECE: {ece:.4f}, "
+                f"Val MCE: {mce:.4f}, "
+                f"Val Acc: {acc:.4f}, "
+                f"Val F1: {f1:.4f}"
             )
 
             val_losses.append(val_loss)
@@ -175,7 +175,7 @@ class Model:
 
         return true_labels, predicted_labels, confidence_all_classes, avg_loss
 
-    def create_data_loaders(self, batch_size, test_dir, train_dir, train_val_split_ratio):
+    def create_data_loaders(self, batch_size, test_dir, train_dir, val_dir):
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -184,21 +184,12 @@ class Model:
 
         # Create custom ImageNet dataset loaders
         train_dataset = ImageFolder(train_dir, transform=transform)
+        val_dataset = ImageFolder(val_dir, transform=transform)
         test_dataset = ImageFolder(test_dir, transform=transform)
 
-        # Ensure split is all the Time the same! Important!
-        torch.manual_seed(42)
-
-        # Define train-validation split
-        train_size = int(train_val_split_ratio * len(train_dataset))
-        val_size = len(train_dataset) - train_size
-
-        # Perform the split
-        train_subset, val_subset = random_split(train_dataset, [train_size, val_size])
-
         # Create data loaders for each subset
-        self.train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, num_workers=4)
-        self.val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, num_workers=4)
+        self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+        self.val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
         self.test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     def get_class_mappings(self):
