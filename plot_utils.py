@@ -3,9 +3,14 @@ import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.calibration import calibration_curve
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, roc_curve, auc, roc_auc_score, \
-    precision_recall_curve
-from sklearn.preprocessing import label_binarize
+from sklearn.metrics import (roc_curve,
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    precision_score,
+    recall_score,
+    f1_score,
+    accuracy_score, auc, roc_auc_score, precision_recall_curve
+)
 
 from data_utils import get_class_names
 
@@ -34,16 +39,6 @@ def plot_loss(train_loss, val_loss):
     plt.legend()
     plt.grid(True)
     plt.show()
-
-
-from sklearn.metrics import (
-    confusion_matrix,
-    ConfusionMatrixDisplay,
-    precision_score,
-    recall_score,
-    f1_score,
-    accuracy_score,
-)
 
 
 def plot_confusion_matrix(true_labels, predicted_labels, title):
@@ -123,9 +118,6 @@ def plot_multiple_calibration_curves(true_labels, y_pred_proba_list, labels, tit
     plt.grid(alpha=0.6)
     plt.tight_layout()
     plt.show()
-
-
-from sklearn.metrics import roc_curve
 
 
 def plot_roc_curve(true_labels, predicted_probabilities, model_label):
@@ -219,7 +211,6 @@ def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
         ece (float): Expected Calibration Error.
         mce (float): Maximum Calibration Error.
     """
-    # Convert to array if list provided
     true_labels = np.array(true_labels)
     predicted_probabilities = np.array(predicted_probabilities)
 
@@ -241,24 +232,25 @@ def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
     # Compute calibration curve
     prob_true, prob_pred = calibration_curve(true_labels, predicted_probabilities, n_bins=n_bins, strategy='uniform')
 
-    # Calculate bin weights
-    bin_counts, _ = np.histogram(predicted_probabilities, bins=n_bins, range=(0, 1))
-    bin_weights = bin_counts / bin_counts.sum()  # Normalize weights
+    # Calculate weights from calibration curve bins
+    bin_counts, bin_edges = np.histogram(predicted_probabilities, bins=n_bins, range=(0, 1))
+    total_count = np.sum(bin_counts)
 
-    # Align bin_weights with valid bins
-    valid_bins = bin_counts > 0
-    bin_errors = np.abs(prob_true - prob_pred)
+    # Align weights with calibration bins
+    bin_weights = bin_counts / total_count  # Normalize
+    valid_bins = bin_weights > 0  # Match bins with non-zero counts in calibration_curve
     bin_weights = bin_weights[valid_bins]
 
-    # Ensure shapes align
-    assert len(bin_errors) == len(bin_weights), "Mismatch between bin errors and weights."
+    # Ensure alignment of weights and calibration bins
+    if len(bin_weights) != len(prob_true):
+        bin_weights = bin_weights[:len(prob_true)]  # Trim weights to match valid calibration bins
 
     # Calculate ECE and MCE
+    bin_errors = np.abs(prob_true - prob_pred)
     ece = np.sum(bin_errors * bin_weights)  # Weighted average
     mce = np.max(bin_errors)
 
     return ece, mce
-
 
 
 def plot_pr_curve(true_labels, predicted_probabilities, model_label='Model'):
