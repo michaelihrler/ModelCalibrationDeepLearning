@@ -4,7 +4,6 @@ import torch
 
 from betacal import BetaCalibration
 from netcal.binning import HistogramBinning
-from netcal.scaling import TemperatureScaling
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from torch import optim, nn
@@ -19,7 +18,7 @@ from sklearn.isotonic import IsotonicRegression
 
 import ml_insights as mli
 
-
+from temperature_scaling import TemperatureScaling
 
 
 class Model:
@@ -173,7 +172,7 @@ class Model:
         avg_loss = total_loss / len(dataloader)
         confidence_all_classes = np.vstack(confidence_all_classes)
 
-        return true_labels, predicted_labels, confidence_all_classes, avg_loss
+        return true_labels, predicted_labels, confidence_all_classes, avg_loss, logits
 
     def create_data_loaders(self, batch_size, test_dir, train_dir, val_dir):
         transform = transforms.Compose([
@@ -197,8 +196,8 @@ class Model:
         return train_dataset.class_to_idx
 
     def optimize_temperature(self, y_true, y_pred_confidence):
-        y_true = np.array(y_true)
-        y_pred_confidence = np.array(y_pred_confidence)
+        y_true = torch.from_numpy(np.array(y_true))
+        y_pred_confidence = torch.from_numpy(np.array(y_pred_confidence))
         self.temperature_model = TemperatureScaling()
         self.temperature_model.fit(y_pred_confidence, y_true)
 
@@ -244,14 +243,28 @@ class Model:
         return predicted_tensor.tolist(), convert_1d_probs_to_2d_probs(calibrated_probabilities)
 
     def evaluate_with_temperature_scaling(self, y_pred_confidence):
+        """
+        Evaluate the model with temperature scaling applied.
+
+        Args:
+            y_pred_confidence (numpy.ndarray): Logits from the model of shape (n_samples, n_classes).
+
+        Returns:
+            Tuple:
+                - predicted_labels (numpy.ndarray): Predicted labels of shape (n_samples, 1).
+                - calibrated_probabilities (numpy.ndarray): Calibrated probabilities of shape (n_samples, n_classes).
+        """
+        # Ensure input is a numpy array
         y_pred_confidence = np.array(y_pred_confidence)
-        calibrated_probabilities = self.temperature_model.transform(y_pred_confidence)
 
-        # Convert calibrated probabilities into a 2D array
-        calibrated_probabilities_2d = convert_1d_probs_to_2d_probs(calibrated_probabilities)
-        predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
+        # Pass logits through temperature scaling to get calibrated probabilities
+        calibrated_probabilities = self.temperature_model.predict(torch.tensor(y_pred_confidence)).numpy()
 
-        return predicted_tensor.tolist(), calibrated_probabilities_2d
+        # Convert probabilities to predicted labels (threshold = 0.5 for binary classification)
+        predicted_labels = (calibrated_probabilities[:, 1] >= 0.5).astype(int)
+
+        # Return results
+        return predicted_labels, calibrated_probabilities
 
     def evaluate_with_histogram_binning(self, y_pred_confidence):
         y_pred_confidence = np.array(y_pred_confidence)
