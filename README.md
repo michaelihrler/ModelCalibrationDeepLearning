@@ -1,38 +1,7 @@
 # ModelCalibrationDeepLearning
-
-## Prerequisites
-
-- Make sure Python is installed on your system. You can verify by running:
-  ```bash
-  python --version
-  ```
-  or
-  ```bash
-  python3 --version
-  ```
-- Create virtual environment
-    ```bash
-  python -m venv venv
-  ```
-  or
-    ```bash
-  python3 -m venv venv
-  ```
-- Activate
-  
-  Linux/Mac:
-  ```bash
-  source venv/bin/activate
-  ```
-  Windows (not sure about this):
-  ```bash
-  .\venv\Scripts\activate
-  ```
-
-- Install requirements.txt
-
-```bash
-  pip install -r requirements.txt
-  ```
+1. Download Dataset from https://www.kaggle.com/datasets/tolgadincer/labeled-chest-xray-images and put it in the project folder under /data
+2. Execute calibration_test_split_script.py to split the test data in test and calibration data (better would be to get the calibration data from the train-data)
+3. Execute the jupyter-notebooks in dir /notebooks_model_training to train the models
+4. Execute the jupyter-notebooks in dir /notebooks_calibration to calibrate the models with several calibration techniques
   
 

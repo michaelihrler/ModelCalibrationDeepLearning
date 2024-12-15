@@ -43,14 +43,13 @@ class Model:
 
         # Load a pretrained VGG16 model
         base_model = vgg16(weights=VGG16_Weights.IMAGENET1K_V1)
-        base_model.features = nn.Sequential(*list(base_model.features.children())[:30])  # Up to 'block5_conv3'
+        base_model.features = nn.Sequential(*list(base_model.features.children())[:30])
 
-        # Add custom head
         self.model = nn.Sequential(
             base_model.features,
-            nn.AdaptiveAvgPool2d((1, 1)),  # GlobalAveragePooling2D equivalent
+            nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(512, len(get_class_names(train_dir)))  # Replace 512 with num_features if different
+            nn.Linear(512, len(get_class_names(train_dir)))
         )
 
         self.model = self.model.to(self.device)
@@ -81,7 +80,7 @@ class Model:
             for input_tensor, label_tensor in self.train_loader:
                 input_tensor, label_tensor = input_tensor.to(self.device), label_tensor.to(self.device)
 
-                self.optimizer.zero_grad()  # Reset gradients
+                self.optimizer.zero_grad()
                 output_tensor = self.model(input_tensor)
                 loss = self.criterion(output_tensor, label_tensor)
                 loss.backward()
@@ -89,7 +88,6 @@ class Model:
 
                 train_loss += loss.item()  # Accumulate batch loss
 
-            # Calculate average train loss
             avg_train_loss = train_loss / len(self.train_loader)
             train_losses.append(avg_train_loss)
 
@@ -135,18 +133,12 @@ class Model:
         return train_losses, val_losses
 
     def evaluate(self, dataloader=None):
-        """
-        Evaluate the model on the given dataloader.
-
-        :param dataloader: DataLoader to evaluate on. Defaults to test_loader if None.
-        :return: Tuple (true_labels, predicted_labels, confidence_all_classes, average_loss)
-        """
         self.model.eval()
         true_labels = []
         predicted_labels = []
         confidence_all_classes = []
         logits = []
-        total_loss = 0.0  # Use a separate variable for accumulating loss
+        total_loss = 0.0
 
         if dataloader is None:
             dataloader = self.test_loader
@@ -166,9 +158,8 @@ class Model:
                 predicted_labels.extend(predicted_tensor.cpu().tolist())
 
                 batch_loss = self.criterion(output_tensor, label_tensor)
-                total_loss += batch_loss.item()  # Accumulate batch loss
+                total_loss += batch_loss.item()
 
-        # Calculate average loss over all batches
         avg_loss = total_loss / len(dataloader)
         confidence_all_classes = np.vstack(confidence_all_classes)
 
@@ -181,12 +172,10 @@ class Model:
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-        # Create custom ImageNet dataset loaders
         train_dataset = ImageFolder(train_dir, transform=transform)
         val_dataset = ImageFolder(val_dir, transform=transform)
         test_dataset = ImageFolder(test_dir, transform=transform)
 
-        # Create data loaders for each subset
         self.train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
         self.val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
         self.test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
@@ -237,7 +226,6 @@ class Model:
     def evaluate_with_platt_scaling(self, logits):
         logits = np.array(logits)
         calibrated_probabilities = self.platt_scaling.predict_proba(logits)
-        # Apply a threshold of 0.5 to get predicted labels
         predicted_tensor = torch.tensor((calibrated_probabilities[:, 1] >= 0.5).astype(int))
         return predicted_tensor.tolist(), calibrated_probabilities
 
@@ -254,7 +242,6 @@ class Model:
         y_pred_confidence = np.array(y_pred_confidence)
         calibrated_probabilities = self.histogram_binning_model.transform(y_pred_confidence)
 
-        # Convert calibrated probabilities into a 2D array
         calibrated_probabilities_2d = convert_1d_probs_to_2d_probs(calibrated_probabilities)
         predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
 
@@ -264,22 +251,18 @@ class Model:
         y_pred_confidence = np.array(y_pred_confidence)
         calibrated_probabilities = self.isotonic_calibration_model.predict(y_pred_confidence)
 
-        # Convert calibrated probabilities into a 2D array
         calibrated_probabilities_2d = convert_1d_probs_to_2d_probs(calibrated_probabilities)
-        # Apply a threshold of 0.5 to get predicted labels
         predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
 
         return predicted_tensor.tolist(), calibrated_probabilities_2d
 
     def evaluate_with_beta_calibration(self, y_pred_confidence):
         calibrated_probabilities = self.beta_calibration_model.predict(y_pred_confidence)
-        # Apply a threshold of 0.5 to get predicted labels
         predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
         return predicted_tensor.tolist(), convert_1d_probs_to_2d_probs(calibrated_probabilities)
 
     def evaluate_with_spline_calibration(self, y_pred_confidence):
         calibrated_probabilities = self.spline_calibration_model.predict(y_pred_confidence)
-        # Apply a threshold of 0.5 to get predicted labels
         predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
         return predicted_tensor.tolist(), convert_1d_probs_to_2d_probs(calibrated_probabilities)
 

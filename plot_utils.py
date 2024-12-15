@@ -42,20 +42,6 @@ def plot_loss(train_loss, val_loss):
 
 
 def plot_confusion_matrix(true_labels, predicted_labels, title):
-    """
-    Plots the confusion matrix with labels NORMAL and PNEUMONIA and computes F1-score, precision, recall, and accuracy.
-
-    Parameters:
-        true_labels (array-like): Ground truth (binary) target values (0 for NORMAL, 1 for PNEUMONIA).
-        predicted_labels (array-like): Predicted labels (0 for NORMAL, 1 for PNEUMONIA).
-        title (str): Title for the confusion matrix plot.
-
-    Returns:
-        f1 (float): F1-score.
-        precision (float): Precision score.
-        recall (float): Recall score.
-        accuracy (float): Accuracy score.
-    """
     # Define class labels
     class_labels = ["NORMAL", "PNEUMONIA"]
 
@@ -78,17 +64,6 @@ def plot_confusion_matrix(true_labels, predicted_labels, title):
 
 
 def plot_multiple_calibration_curves(true_labels, y_pred_proba_list, labels, title, n_bins=10, strategy='uniform'):
-    """
-    Plots multiple calibration curves on the same plot with a shared y_true.
-
-    Parameters:
-        true_labels (array): The ground truth array (shared for all models).
-        y_pred_proba_list (list): A list of predicted probability arrays (one for each model).
-        labels (list): A list of labels for each model/curve.
-        title (str): The title of the plot.
-        n_bins (int): Number of bins to use in the calibration curve.
-        strategy (str): Strategy for binning ('uniform' or 'quantile').
-    """
     # Convert to array if list provided
     true_labels = np.array(true_labels)
 
@@ -121,14 +96,6 @@ def plot_multiple_calibration_curves(true_labels, y_pred_proba_list, labels, tit
 
 
 def plot_roc_curve(true_labels, predicted_probabilities, model_label):
-    """
-    Plots the Receiver Operating Characteristic (ROC) curve for the model.
-
-    Parameters:
-        true_labels (array-like): True binary labels.
-        predicted_probabilities (array-like): Predicted probabilities for the positive class.
-        model_label (str): Label for the model in the legend
-    """
     # Convert to array if list provided
     true_labels = np.array(true_labels)
     # Calculate False Positive Rate, True Positive Rate, and G-means
@@ -209,19 +176,6 @@ def round_results(results, decimals=3):
 
 
 def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
-    """
-    Plots a histogram of predicted probabilities for the two classes (y==0 and y==1).
-    Calculates and returns Expected Calibration Error (ECE) and Maximum Calibration Error (MCE).
-
-    Parameters:
-        true_labels (array-like): Ground truth binary labels (0 or 1).
-        predicted_probabilities (array-like): Predicted probabilities for the positive class.
-        n_bins (int): Number of bins to divide the predicted probabilities. Default is 10.
-
-    Returns:
-        ece (float): Expected Calibration Error.
-        mce (float): Maximum Calibration Error.
-    """
     true_labels = np.array(true_labels)
     predicted_probabilities = np.array(predicted_probabilities)
 
@@ -265,19 +219,6 @@ def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):
 
 
 def plot_pr_curve(true_labels, predicted_probabilities, model_label='Model'):
-    """
-    Plots the Precision-Recall (PR) curve for the model and calculates the optimal threshold, F1-score, and AUC.
-
-    Parameters:
-        true_labels (array-like): Ground truth (binary) target values.
-        predicted_probabilities (array-like): Predicted probabilities for the positive class.
-        model_label (str): Label for the model in the legend. Default is 'Model'.
-
-    Returns:
-        best_threshold (float): Threshold corresponding to the best F1-score.
-        best_f1 (float): Best F1-score across all thresholds.
-        pr_auc (float): Area under the Precision-Recall curve.
-    """
     # Convert to array if list provided
     true_labels = np.array(true_labels)
     # Calculate precision, recall, and thresholds
@@ -293,11 +234,10 @@ def plot_pr_curve(true_labels, predicted_probabilities, model_label='Model'):
     optimal_ix = np.argmax(f1_scores)
     best_f1 = f1_scores[optimal_ix]
 
-    # Note: `precision_recall_curve` produces one fewer threshold than precision/recall
     if optimal_ix < len(thresholds_pr):
         best_threshold = thresholds_pr[optimal_ix]
     else:
-        best_threshold = 1.0  # Handle edge cases where no valid threshold exists
+        best_threshold = 1.0
 
     # Compute area under the PR curve
     pr_auc = auc(recall, precision)
