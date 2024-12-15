@@ -4,13 +4,13 @@ import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import (roc_curve,
-    confusion_matrix,
-    ConfusionMatrixDisplay,
-    precision_score,
-    recall_score,
-    f1_score,
-    accuracy_score, auc, roc_auc_score, precision_recall_curve
-)
+                             confusion_matrix,
+                             ConfusionMatrixDisplay,
+                             precision_score,
+                             recall_score,
+                             f1_score,
+                             accuracy_score, auc, roc_auc_score, precision_recall_curve
+                             )
 
 from data_utils import get_class_names
 
@@ -163,6 +163,7 @@ def plot_roc_curve(true_labels, predicted_probabilities, model_label):
 
 
 def plot_metrics_table(results):
+    results = round_results(results)
     df = pd.DataFrame(results)
 
     # Create a Matplotlib figure
@@ -195,6 +196,16 @@ def plot_metrics_table(results):
             cell.set_facecolor("white")
 
     plt.show()
+
+
+def round_results(results, decimals=3):
+    rounded_results = {}
+    for key, values in results.items():
+        if key == "Metric":
+            rounded_results[key] = values
+        else:
+            rounded_results[key] = [round(float(value), decimals) for value in values]
+    return rounded_results
 
 
 def plot_probability_histogram(true_labels, predicted_probabilities, n_bins=10):

@@ -202,11 +202,11 @@ class Model:
         self.temperature_model.fit(y_pred_confidence, y_true)
 
 
-    def optimize_platt_scaling(self, y_true, y_pred_confidence, regularisation):
+    def optimize_platt_scaling(self, y_true, logits, regularisation):
         y_true = np.array(y_true)
-        y_pred_confidence = np.array(y_pred_confidence)
+        logits = np.array(logits)
         self.platt_scaling = LogisticRegression(C=regularisation, solver='lbfgs')
-        self.platt_scaling.fit(y_pred_confidence.reshape(-1, 1), y_true)
+        self.platt_scaling.fit(logits, y_true)
 
     def optimize_isotonic_calibration(self, y_true, y_pred_confidence):
         y_true = np.array(y_true)
@@ -231,39 +231,23 @@ class Model:
         self.spline_calibration_model = mli.SplineCalib(
             knot_sample_size=40,
             cv_spline=5,
-            unity_prior=False,
-            unity_prior_weight=128)
+            unity_prior=False)
         self.spline_calibration_model.fit(y_pred_confidence, y_true)
 
-    def evaluate_with_platt_scaling(self, y_pred_confidence):
-        y_pred_confidence = np.array(y_pred_confidence)
-        calibrated_probabilities = self.platt_scaling.predict_proba(y_pred_confidence.reshape(-1, 1))[:, 1]
+    def evaluate_with_platt_scaling(self, logits):
+        logits = np.array(logits)
+        calibrated_probabilities = self.platt_scaling.predict_proba(logits)
         # Apply a threshold of 0.5 to get predicted labels
-        predicted_tensor = torch.tensor((calibrated_probabilities >= 0.5).astype(int))
-        return predicted_tensor.tolist(), convert_1d_probs_to_2d_probs(calibrated_probabilities)
+        predicted_tensor = torch.tensor((calibrated_probabilities[:, 1] >= 0.5).astype(int))
+        return predicted_tensor.tolist(), calibrated_probabilities
 
-    def evaluate_with_temperature_scaling(self, y_pred_confidence):
-        """
-        Evaluate the model with temperature scaling applied.
+    def evaluate_with_temperature_scaling(self, logits):
+        logits = np.array(logits)
 
-        Args:
-            y_pred_confidence (numpy.ndarray): Logits from the model of shape (n_samples, n_classes).
+        calibrated_probabilities = self.temperature_model.predict(torch.tensor(logits)).numpy()
 
-        Returns:
-            Tuple:
-                - predicted_labels (numpy.ndarray): Predicted labels of shape (n_samples, 1).
-                - calibrated_probabilities (numpy.ndarray): Calibrated probabilities of shape (n_samples, n_classes).
-        """
-        # Ensure input is a numpy array
-        y_pred_confidence = np.array(y_pred_confidence)
-
-        # Pass logits through temperature scaling to get calibrated probabilities
-        calibrated_probabilities = self.temperature_model.predict(torch.tensor(y_pred_confidence)).numpy()
-
-        # Convert probabilities to predicted labels (threshold = 0.5 for binary classification)
         predicted_labels = (calibrated_probabilities[:, 1] >= 0.5).astype(int)
 
-        # Return results
         return predicted_labels, calibrated_probabilities
 
     def evaluate_with_histogram_binning(self, y_pred_confidence):
